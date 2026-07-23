@@ -4,8 +4,6 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
 /// The client identifier the Beatport web player presents. Its authorization
 /// code grant takes no secret, so a username and password are enough to issue a
 /// token pair without registering an OAuth application.
@@ -110,44 +108,6 @@ abstract class TokenStore {
   Future<TokenPair?> read();
   Future<void> write(TokenPair token);
   Future<void> clear();
-}
-
-/// Keeps the token in the platform keychain.
-///
-/// Only the token is persisted, never the password, and the keychain keeps it
-/// out of a plain file that a backup or sync tool would pick up.
-class SecureTokenStore implements TokenStore {
-  SecureTokenStore({FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage();
-
-  static const String _key = 'beatport_token';
-
-  final FlutterSecureStorage _storage;
-
-  @override
-  Future<TokenPair?> read() async {
-    String? raw;
-    try {
-      raw = await _storage.read(key: _key);
-    } on Exception {
-      // A keychain that cannot be opened is treated as empty: logging in again
-      // is a better outcome than refusing to start.
-      return null;
-    }
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      return TokenPair.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-    } on FormatException {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> write(TokenPair token) =>
-      _storage.write(key: _key, value: jsonEncode(token.toJson()));
-
-  @override
-  Future<void> clear() => _storage.delete(key: _key);
 }
 
 /// Keeps the token in a plain JSON file, used by tests and headless runs where

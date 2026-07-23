@@ -12,6 +12,7 @@ import '../engine/client.dart';
 import '../engine/errors.dart';
 import '../engine/models.dart';
 import '../engine/reference_cache.dart';
+import '../engine/secure_token_store.dart';
 import '../engine/token.dart';
 
 enum SessionStatus { restoring, signedOut, signedIn }

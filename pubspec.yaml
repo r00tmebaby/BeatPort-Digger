@@ -45,6 +45,8 @@ dependencies:
   crypto: ^3.0.7
   media_kit: ^1.2.6
   media_kit_libs_audio: ^1.0.7
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
 
 dev_dependencies:
   flutter_test:
