@@ -1,4 +1,4 @@
-package com.r00tme.beatport_catalog_app
+package com.r00tme.cratedigger
 
 import io.flutter.embedding.android.FlutterActivity
 
