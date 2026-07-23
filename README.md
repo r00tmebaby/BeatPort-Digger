@@ -1,6 +1,6 @@
-# Cratedigger
+# BeatPort Digger
 
-Cratedigger is a cross-platform desktop and mobile client for browsing, previewing,
+BeatPort Digger is a cross-platform desktop and mobile client for browsing, previewing,
 and downloading from the Beatport catalogue. It signs in with a Beatport account,
 searches the catalogue, plays track previews, and exports purchased or available
 tracks with configurable audio quality and file organisation.

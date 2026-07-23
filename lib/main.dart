@@ -13,11 +13,11 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Loads the native audio libraries preview playback needs.
   MediaKit.ensureInitialized();
-  runApp(const CratediggerApp());
+  runApp(const BeatPortDiggerApp());
 }
 
-class CratediggerApp extends StatelessWidget {
-  const CratediggerApp({super.key});
+class BeatPortDiggerApp extends StatelessWidget {
+  const BeatPortDiggerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +40,7 @@ class CratediggerApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'Cratedigger',
+        title: 'BeatPort Digger',
         debugShowCheckedModeBanner: false,
         theme: _theme(Brightness.light),
         darkTheme: _theme(Brightness.dark),

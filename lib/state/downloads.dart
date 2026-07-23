@@ -12,6 +12,7 @@ import '../engine/catalog.dart';
 import '../engine/download.dart';
 import '../engine/download_history.dart';
 import '../engine/ffmpeg.dart';
+import '../engine/media_store.dart';
 import '../engine/models.dart';
 
 enum JobStatus { queued, running, completed, failed, cancelled }
@@ -574,7 +575,23 @@ class DownloadQueue extends ChangeNotifier {
       job.status = JobStatus.completed;
       job.path = result.path;
       job.remuxed = result.remuxed;
-      _recordHistory(job.track, result.path);
+
+      // On Android, move the file into the shared Music/BeatPort Digger folder so
+      // the Files app and other apps (DJ software) can see it. Playback then
+      // uses the public path returned; the private copy is removed.
+      if (Platform.isAndroid) {
+        final name = result.path.split(Platform.pathSeparator).last;
+        final published = await MediaStore.publishAudio(
+          sourcePath: result.path,
+          displayName: name,
+        );
+        if (published != null) {
+          await File(result.path).delete().catchError((_) => File(result.path));
+          job.path = published;
+        }
+      }
+
+      _recordHistory(job.track, job.path!);
     } on DownloadCancelled {
       job.status = JobStatus.cancelled;
     } on Object catch (exception) {

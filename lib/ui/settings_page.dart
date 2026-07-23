@@ -173,9 +173,12 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               Text(
                 queue.destinationOverride == null
-                    ? (Platform.isAndroid || Platform.isIOS
-                          ? 'Saved in the app storage, reachable from the Files '
-                                'app. Named "Artists - Title (Mix)".'
+                    ? (Platform.isAndroid
+                          ? 'Saved to Music/BeatPort Digger, visible in the Files '
+                                'app and to other apps.'
+                          : Platform.isIOS
+                          ? 'Saved in the app folder, reachable from the Files '
+                                'app.'
                           : 'Default location. Files are named '
                                 '"Artists - Title (Mix)".')
                     : 'Custom location.',

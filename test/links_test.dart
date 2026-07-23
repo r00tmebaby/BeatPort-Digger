@@ -1,4 +1,4 @@
-import 'package:cratedigger/engine/links.dart';
+import 'package:beatport_digger/engine/links.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

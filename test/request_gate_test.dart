@@ -1,4 +1,4 @@
-import 'package:cratedigger/engine/request_gate.dart';
+import 'package:beatport_digger/engine/request_gate.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

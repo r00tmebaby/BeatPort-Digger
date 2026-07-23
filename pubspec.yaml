@@ -1,5 +1,5 @@
-name: cratedigger
-description: "Cratedigger - browse, preview and download the Beatport catalogue."
+name: beatport_digger
+description: "BeatPort Digger - browse, preview and download the Beatport catalogue."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -56,6 +56,23 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+# Launcher icon generation. Run `dart run flutter_launcher_icons` after changing
+# the source art in assets/icon to regenerate the per-platform icons.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#0E1512"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/icon.png"
+  macos:
+    generate: true
+    image_path: "assets/icon/icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

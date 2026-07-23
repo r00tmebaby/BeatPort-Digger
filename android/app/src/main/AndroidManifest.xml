@@ -3,7 +3,7 @@
          streams previews over the network. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Cratedigger"
+        android:label="BeatPort Digger"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

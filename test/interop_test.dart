@@ -5,12 +5,12 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cratedigger/engine/token.dart';
+import 'package:beatport_digger/engine/token.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('reads back a credentials JSON written to disk', () async {
-    final dir = await Directory.systemTemp.createTemp('cratedigger_token_');
+    final dir = await Directory.systemTemp.createTemp('beatport_digger_token_');
     final path = '${dir.path}${Platform.pathSeparator}credentials.json';
 
     const written = TokenPair(

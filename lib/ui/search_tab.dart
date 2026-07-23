@@ -512,9 +512,17 @@ class _SearchTabState extends State<SearchTab> {
         ),
       ),
       if (chips.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Wrap(spacing: 6, runSpacing: 6, children: chips),
+        // One scrolling row, never a stack: however many filters are set, the
+        // list keeps its height.
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            itemCount: chips.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 6),
+            itemBuilder: (_, i) => Center(child: chips[i]),
+          ),
         ),
     ];
   }

@@ -1,4 +1,4 @@
-import 'package:cratedigger/engine/models.dart';
+import 'package:beatport_digger/engine/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Track fromJson(Map<String, dynamic> extra) => Track.fromJson({

@@ -1,4 +1,4 @@
-import 'package:cratedigger/engine/debouncer.dart';
+import 'package:beatport_digger/engine/debouncer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

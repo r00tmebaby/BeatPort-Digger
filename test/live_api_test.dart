@@ -8,10 +8,10 @@ library;
 
 import 'dart:io';
 
-import 'package:cratedigger/engine/auth.dart';
-import 'package:cratedigger/engine/catalog.dart';
-import 'package:cratedigger/engine/client.dart';
-import 'package:cratedigger/engine/token.dart';
+import 'package:beatport_digger/engine/auth.dart';
+import 'package:beatport_digger/engine/catalog.dart';
+import 'package:beatport_digger/engine/client.dart';
+import 'package:beatport_digger/engine/token.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 

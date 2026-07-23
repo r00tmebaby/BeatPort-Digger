@@ -60,7 +60,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Cratedigger',
+                    'BeatPort Digger',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall,
                   ),

@@ -1,8 +1,8 @@
-/// Ways of finding tracks, grouped as tabs.
+/// Ways of finding tracks: search, harmonic matching and pasting a link.
 ///
-/// Search, harmonic matching and pasting a link are all the same task - getting
-/// tracks into the list - so they belong together rather than as separate
-/// top-level destinations.
+/// All three are the same task - getting tracks into the list - so they share
+/// one destination. The selector lives in the app header; this page just shows
+/// the chosen one, keeping every tab alive so its state survives a switch.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,59 +11,19 @@ import 'harmonic_page.dart';
 import 'link_tab.dart';
 import 'search_tab.dart';
 
-class BrowsePage extends StatefulWidget {
-  const BrowsePage({super.key});
+class BrowsePage extends StatelessWidget {
+  const BrowsePage({super.key, required this.index});
 
-  @override
-  State<BrowsePage> createState() => _BrowsePageState();
-}
-
-class _BrowsePageState extends State<BrowsePage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _controller;
-
-  static const _tabs = [
-    (icon: Icons.search, label: 'Search'),
-    (icon: Icons.album, label: 'Harmonic'),
-    (icon: Icons.link, label: 'Link'),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TabController(length: _tabs.length, vsync: this)
-      ..addListener(() {
-        if (!_controller.indexIsChanging) setState(() {});
-      });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  /// Which finder to show: 0 search, 1 harmonic, 2 link.
+  final int index;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TabBar(
-          controller: _controller,
-          tabs: [
-            for (final tab in _tabs)
-              Tab(icon: Icon(tab.icon, size: 20), text: tab.label),
-          ],
-        ),
-        // IndexedStack rather than TabBarView: TabBarView disposes the tabs it
-        // is not showing, which would throw away search results every time the
-        // tab changed.
-        Expanded(
-          child: IndexedStack(
-            index: _controller.index,
-            children: const [SearchTab(), HarmonicPage(), LinkTab()],
-          ),
-        ),
-      ],
+    // IndexedStack rather than TabBarView: it keeps the tabs it is not showing
+    // alive, so search results are not thrown away when the finder changes.
+    return IndexedStack(
+      index: index,
+      children: const [SearchTab(), HarmonicPage(), LinkTab()],
     );
   }
 }

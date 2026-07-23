@@ -1,5 +1,5 @@
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/engine/reference_cache.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/engine/reference_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

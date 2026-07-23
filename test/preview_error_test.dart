@@ -1,6 +1,6 @@
-import 'package:cratedigger/engine/errors.dart';
-import 'package:cratedigger/engine/hls.dart';
-import 'package:cratedigger/state/player.dart';
+import 'package:beatport_digger/engine/errors.dart';
+import 'package:beatport_digger/engine/hls.dart';
+import 'package:beatport_digger/state/player.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

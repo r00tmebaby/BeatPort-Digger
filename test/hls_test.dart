@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:cratedigger/engine/download.dart';
-import 'package:cratedigger/engine/hls.dart';
+import 'package:beatport_digger/engine/download.dart';
+import 'package:beatport_digger/engine/hls.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 import 'package:pointycastle/block/aes.dart';

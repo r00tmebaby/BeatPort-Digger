@@ -1,5 +1,5 @@
-import 'package:cratedigger/engine/catalog.dart';
-import 'package:cratedigger/engine/models.dart';
+import 'package:beatport_digger/engine/catalog.dart';
+import 'package:beatport_digger/engine/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Total pages the UI should show for a result count, mirroring the search

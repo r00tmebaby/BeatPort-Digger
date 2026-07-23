@@ -1,5 +1,5 @@
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/engine/naming.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/engine/naming.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Track make({

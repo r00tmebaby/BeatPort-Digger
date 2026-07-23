@@ -1,4 +1,4 @@
-# Building Cratedigger for iPad / iPhone
+# Building BeatPort Digger for iPad / iPhone
 
 iOS and iPadOS builds can only be produced on **macOS with Xcode**. They cannot be
 built, signed, or transferred from Windows or Linux. This guide assumes you are on
@@ -15,17 +15,17 @@ a Mac.
 
 The project is already configured for iOS:
 
-- Bundle identifier: `com.r00tme.cratedigger`
-- Display name: `Cratedigger`
+- Bundle identifier: `com.r00tme.beatportdigger`
+- Display name: `BeatPort Digger`
 - Universal app (iPad orientations enabled)
 - File sharing enabled, so downloaded tracks appear in the Files app under
-  *On My iPad -> Cratedigger* and can be imported by other apps.
+  *On My iPad -> BeatPort Digger* and can be imported by other apps.
 
 ## First-time setup on the Mac
 
 ```bash
-git clone https://github.com/r00tmebaby/cratedigger.git
-cd cratedigger
+git clone https://github.com/r00tmebaby/beatport_digger.git
+cd beatport_digger
 flutter pub get
 cd ios && pod install && cd ..
 ```
@@ -40,7 +40,7 @@ cd ios && pod install && cd ..
 
 2. Select the **Runner** target -> **Signing & Capabilities**.
 3. Tick **Automatically manage signing** and choose your **Team** (your Apple ID).
-4. If the bundle id `com.r00tme.cratedigger` is taken on Apple's side, change it to
+4. If the bundle id `com.r00tme.beatportdigger` is taken on Apple's side, change it to
    something unique (for example add your initials) here and in
    `ios/Runner/Info.plist` is not needed - Xcode's field is enough.
 

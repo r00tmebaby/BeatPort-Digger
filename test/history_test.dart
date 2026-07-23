@@ -1,4 +1,4 @@
-import 'package:cratedigger/engine/download_history.dart';
+import 'package:beatport_digger/engine/download_history.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 HistoryEntry entry(int id, {bool present = true}) => HistoryEntry(

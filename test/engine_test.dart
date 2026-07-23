@@ -1,8 +1,8 @@
-import 'package:cratedigger/engine/auth.dart';
-import 'package:cratedigger/engine/catalog.dart';
-import 'package:cratedigger/engine/errors.dart';
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/engine/token.dart';
+import 'package:beatport_digger/engine/auth.dart';
+import 'package:beatport_digger/engine/catalog.dart';
+import 'package:beatport_digger/engine/errors.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/engine/token.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

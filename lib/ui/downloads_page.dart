@@ -260,11 +260,13 @@ class _JobTile extends StatelessWidget {
             ? '${_megabytes(progress.bytes)} of '
                   '${_megabytes(progress.total)}'
             : _megabytes(progress.bytes),
-      // A phone path is a long private URI that means nothing to the user, so
-      // only desktop, where the file can be opened, shows where it landed.
+      // Phones show the friendly shared location; desktop shows the full path
+      // it can actually open.
       JobStatus.completed =>
-        (Platform.isAndroid || Platform.isIOS)
-            ? (job.remuxed ? 'Saved' : 'Saved (.ts)')
+        Platform.isAndroid
+            ? 'Saved to Music/BeatPort Digger'
+            : Platform.isIOS
+            ? 'Saved to the app folder (Files app)'
             : (job.remuxed
                   ? 'Saved to ${job.path}'
                   : 'Saved as .ts to ${job.path}'),

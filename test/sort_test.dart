@@ -1,5 +1,5 @@
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/ui/widgets/track_table.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/ui/widgets/track_table.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Track track({

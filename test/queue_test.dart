@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cratedigger/engine/download_history.dart';
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/state/downloads.dart';
+import 'package:beatport_digger/engine/download_history.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/state/downloads.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

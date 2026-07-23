@@ -1,6 +1,6 @@
-import 'package:cratedigger/engine/catalog.dart';
-import 'package:cratedigger/engine/models.dart';
-import 'package:cratedigger/ui/search_tab.dart';
+import 'package:beatport_digger/engine/catalog.dart';
+import 'package:beatport_digger/engine/models.dart';
+import 'package:beatport_digger/ui/search_tab.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
