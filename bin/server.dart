@@ -10,8 +10,10 @@
 /// where ADDRESS is one of the LAN addresses printed at startup.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -44,6 +46,16 @@ class InMemoryTokenStore implements TokenStore {
 
 final http.Client _http = http.Client();
 Catalog? _catalog;
+
+/// Disk cache of assembled previews, so a track is decrypted once and replays
+/// (and downloads) are served straight from the file.
+final Directory _previewCache = Directory(
+  '${Directory.systemTemp.path}${Platform.pathSeparator}beatport_digger_previews',
+);
+
+/// How many segments to fetch at once. The segments are independent, so pulling
+/// them in parallel is far faster than one after another.
+const int _segmentWindow = 12;
 
 const Map<String, String> _cors = {
   'Access-Control-Allow-Origin': '*',
@@ -215,13 +227,28 @@ Future<Response> _genres(Request request) async {
   }
 }
 
+const Map<String, String> _audioHeaders = {
+  'content-type': 'audio/aac',
+  // Let the browser cache a preview it has already fetched.
+  'cache-control': 'public, max-age=86400',
+  ..._cors,
+};
+
 /// Assembles a track's encrypted HLS preview into a plain AAC body the browser
-/// can play. The whole track is fetched and decrypted here, as the app does.
+/// can play. Cached to disk so it is decrypted once; segments are fetched in
+/// parallel so the first play is quick.
 Future<Response> _preview(Request request, String rawId) async {
   final catalog = _catalog;
   if (catalog == null) return _error(401, 'Sign in first.');
   final id = int.tryParse(rawId);
   if (id == null) return _error(400, 'Bad track id.');
+
+  final cacheFile = File(
+    '${_previewCache.path}${Platform.pathSeparator}$id.aac',
+  );
+  if (await cacheFile.exists()) {
+    return Response.ok(await cacheFile.readAsBytes(), headers: _audioHeaders);
+  }
 
   try {
     final stream = await catalog.trackStream(id);
@@ -232,25 +259,47 @@ Future<Response> _preview(Request request, String rawId) async {
       httpClient: _http,
     );
 
-    final builder = BytesBuilder(copy: false);
-    for (final segment in playlist.segments) {
-      final response = await _http.get(segment);
-      if (response.statusCode != 200) {
-        return _error(response.statusCode, 'A stream segment failed.');
-      }
-      final payload = Uint8List.fromList(response.bodyBytes);
-      builder.add(key == null ? payload : decryptSegment(payload, key));
+    // Fetch and decrypt the segments in parallel windows, keeping order.
+    final segments = playlist.segments;
+    final parts = List<Uint8List?>.filled(segments.length, null);
+    for (var start = 0; start < segments.length; start += _segmentWindow) {
+      final end = math.min(start + _segmentWindow, segments.length);
+      await Future.wait([
+        for (var i = start; i < end; i++)
+          _fetchSegment(segments[i], key).then((bytes) => parts[i] = bytes),
+      ]);
     }
 
-    return Response.ok(
-      builder.takeBytes(),
-      headers: {'content-type': 'audio/aac', ..._cors},
+    final builder = BytesBuilder(copy: false);
+    for (final part in parts) {
+      if (part != null) builder.add(part);
+    }
+    final bytes = builder.takeBytes();
+
+    // Write the cache without blocking the response.
+    unawaited(
+      _previewCache
+          .create(recursive: true)
+          .then((_) => cacheFile.writeAsBytes(bytes))
+          .catchError((_) => cacheFile),
     );
+
+    return Response.ok(bytes, headers: _audioHeaders);
   } on BeatportException catch (exception) {
     return _error(exception.status, 'Preview unavailable.');
   } on Object catch (exception) {
     return _error(500, 'Preview failed: $exception');
   }
+}
+
+/// Fetches one segment and decrypts it when the playlist carries a key.
+Future<Uint8List> _fetchSegment(Uri url, StreamKey? key) async {
+  final response = await _http.get(url);
+  if (response.statusCode != 200) {
+    throw BeatportException(response.statusCode, 'segment failed');
+  }
+  final payload = Uint8List.fromList(response.bodyBytes);
+  return key == null ? payload : decryptSegment(payload, key);
 }
 
 /// Serves the built React app (web/frontend/dist) when it exists, so the whole

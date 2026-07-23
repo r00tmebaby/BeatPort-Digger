@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
+import { camelotColor } from './api'
 import type { Track } from './api'
 
 function clock(seconds: number): string {
@@ -89,7 +90,17 @@ export function WavePlayer({
           <div className="now-title">
             {track ? (
               <>
-                {track.key && <span className="key sm">{track.key}</span>}
+                {track.key && (
+                  <span
+                    className="key sm"
+                    style={(() => {
+                      const c = camelotColor(track.key)
+                      return c ? { background: c.bg, color: c.fg } : undefined
+                    })()}
+                  >
+                    {track.key}
+                  </span>
+                )}
                 <span className="t">{track.title}</span>
                 <span className="a">{track.artists}</span>
               </>

@@ -93,12 +93,10 @@ header {
 /* Camelot wheel */
 .wheel { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
 .wheel .k {
-  background: var(--surface-2); color: var(--muted);
-  border: 1px solid var(--line);
-  padding: 8px 0; border-radius: 8px; font-weight: 600; font-size: 13px;
+  border: 0;
+  padding: 8px 0; border-radius: 8px; font-weight: 700; font-size: 13px;
 }
-.wheel .k.compat { background: var(--green-soft); color: var(--green-strong); border-color: var(--green-soft); }
-.wheel .k.sel { background: var(--green); color: #fff; border-color: var(--green); }
+.wheel .k.sel { box-shadow: inset 0 0 0 2.5px #11201a; }
 
 /* Results */
 main { flex: 1; overflow-y: auto; padding-bottom: 132px; }

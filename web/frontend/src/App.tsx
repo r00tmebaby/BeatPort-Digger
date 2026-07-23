@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
-import { api, downloadTrack, harmonicNeighbours } from './api'
+import { api, camelotColor, downloadTrack, harmonicNeighbours } from './api'
 import type { Genre, SearchResponse, Track } from './api'
+
+/** Inline style for a Camelot key chip, coloured like the app's wheel. */
+export function keyStyle(code: string | null) {
+  const c = camelotColor(code)
+  return c ? { background: c.bg, color: c.fg } : undefined
+}
 import { WavePlayer } from './WavePlayer'
 
 function Logo({ size = 26 }: { size?: number }) {
@@ -66,9 +72,15 @@ function Wheel({ selected, onPick }: { selected: string; onPick: (code: string) 
   return (
     <div className="wheel">
       {codes.map((c) => {
-        const cls = c === selected ? 'k sel' : neighbours.includes(c) ? 'k compat' : 'k'
+        const active = c === selected || neighbours.includes(c)
+        const cc = camelotColor(c)!
         return (
-          <button key={c} className={cls} onClick={() => onPick(c)}>
+          <button
+            key={c}
+            className={c === selected ? 'k sel' : 'k'}
+            style={{ background: cc.bg, color: cc.fg, opacity: active ? 1 : 0.4 }}
+            onClick={() => onPick(c)}
+          >
             {c}
           </button>
         )
@@ -265,7 +277,11 @@ export default function App() {
                 <button className="play" onClick={() => setCurrent(t)} title="Preview">
                   {playing ? '❚❚' : '▶'}
                 </button>
-                {t.key && <span className="key">{t.key}</span>}
+                {t.key && (
+                  <span className="key" style={keyStyle(t.key)}>
+                    {t.key}
+                  </span>
+                )}
                 <div className="meta">
                   <div className="title">{t.title}</div>
                   <div className="sub">
