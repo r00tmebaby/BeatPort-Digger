@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/downloads.dart';
+import '../state/player.dart';
 
 class DownloadsPage extends StatefulWidget {
   const DownloadsPage({super.key});
@@ -38,6 +39,24 @@ class _DownloadsPageState extends State<DownloadsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<DownloadQueue>().checkFfmpeg();
     });
+  }
+
+  /// Plays a completed download and sets autoplay to step through the rest of
+  /// the completed list from here.
+  void _play(
+    BuildContext context,
+    DownloadJob job,
+    List<DownloadJob> completed,
+  ) {
+    final player = context.read<PreviewPlayer>();
+    player.setUpNext(
+      [for (final j in completed) j.track],
+      files: {
+        for (final j in completed)
+          if (j.track.id != null && j.path != null) j.track.id!: j.path!,
+      },
+    );
+    if (job.path != null) player.playLocal(job.track, job.path!);
   }
 
   /// Jobs in display order. Recent is newest first; the rest are stable sorts
@@ -140,11 +159,29 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 )
-              : ListView.separated(
-                  itemCount: jobs.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) =>
-                      _JobTile(job: jobs[index], queue: queue),
+              : Builder(
+                  builder: (context) {
+                    // Completed downloads, in display order, are what autoplay
+                    // steps through once one is played.
+                    final completed = jobs
+                        .where(
+                          (j) =>
+                              j.status == JobStatus.completed && j.path != null,
+                        )
+                        .toList();
+                    return ListView.separated(
+                      itemCount: jobs.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final job = jobs[index];
+                        return _JobTile(
+                          job: job,
+                          queue: queue,
+                          onPlay: () => _play(context, job, completed),
+                        );
+                      },
+                    );
+                  },
                 ),
         ),
       ],
@@ -152,14 +189,21 @@ class _DownloadsPageState extends State<DownloadsPage> {
   }
 }
 
-
-String _megabytes(int bytes) => '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+String _megabytes(int bytes) =>
+    '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 
 class _JobTile extends StatelessWidget {
-  const _JobTile({required this.job, required this.queue});
+  const _JobTile({
+    required this.job,
+    required this.queue,
+    required this.onPlay,
+  });
 
   final DownloadJob job;
   final DownloadQueue queue;
+
+  /// Plays this completed download and queues the rest for autoplay.
+  final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +212,11 @@ class _JobTile extends StatelessWidget {
     final progress = job.progress;
 
     return ListTile(
-      title: Text(job.track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        job.track.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -202,17 +250,24 @@ class _JobTile extends StatelessWidget {
     final progress = job.progress;
     return switch (job.status) {
       JobStatus.queued => 'Queued',
-      JobStatus.running => progress == null
-          ? 'Starting...'
-          : progress.segmented
-              ? 'Segment ${progress.completed} of ${progress.total} - '
-                    '${_megabytes(progress.bytes)}'
-              : progress.total > 0
-                  ? '${_megabytes(progress.bytes)} of '
-                        '${_megabytes(progress.total)}'
-                  : _megabytes(progress.bytes),
+      JobStatus.running =>
+        progress == null
+            ? 'Starting...'
+            : progress.segmented
+            ? 'Segment ${progress.completed} of ${progress.total} - '
+                  '${_megabytes(progress.bytes)}'
+            : progress.total > 0
+            ? '${_megabytes(progress.bytes)} of '
+                  '${_megabytes(progress.total)}'
+            : _megabytes(progress.bytes),
+      // A phone path is a long private URI that means nothing to the user, so
+      // only desktop, where the file can be opened, shows where it landed.
       JobStatus.completed =>
-        job.remuxed ? 'Saved to ${job.path}' : 'Saved as .ts to ${job.path}',
+        (Platform.isAndroid || Platform.isIOS)
+            ? (job.remuxed ? 'Saved' : 'Saved (.ts)')
+            : (job.remuxed
+                  ? 'Saved to ${job.path}'
+                  : 'Saved as .ts to ${job.path}'),
       JobStatus.failed => 'Failed',
       JobStatus.cancelled => 'Cancelled',
     };
@@ -228,10 +283,47 @@ class _JobTile extends StatelessWidget {
           onPressed: () => queue.cancel(job),
         );
       case JobStatus.completed:
-        return IconButton(
-          tooltip: 'Show in folder',
-          icon: const Icon(Icons.folder_open),
-          onPressed: job.path == null ? null : () => _reveal(job.path!),
+        return Consumer<PreviewPlayer>(
+          builder: (context, player, _) {
+            final isThis = player.current?.id == job.track.id;
+            final playing = isThis && player.playing;
+            final loading = isThis && player.loading;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (loading)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  )
+                else
+                  IconButton(
+                    tooltip: playing ? 'Pause' : 'Play',
+                    icon: Icon(
+                      playing ? Icons.pause_circle : Icons.play_circle_outline,
+                    ),
+                    onPressed: job.path == null ? null : onPlay,
+                  ),
+                // Revealing a file needs a desktop file manager; phones have no
+                // equivalent, so the folder button is desktop-only.
+                if (!Platform.isAndroid && !Platform.isIOS)
+                  IconButton(
+                    tooltip: 'Show in folder',
+                    icon: const Icon(Icons.folder_open),
+                    onPressed: job.path == null
+                        ? null
+                        : () => _reveal(job.path!),
+                  ),
+              ],
+            );
+          },
         );
       case JobStatus.failed:
       case JobStatus.cancelled:

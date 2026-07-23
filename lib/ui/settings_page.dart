@@ -150,26 +150,34 @@ class _SettingsPageState extends State<SettingsPage> {
                       style: theme.textTheme.bodyMedium,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  OutlinedButton.icon(
-                    onPressed: () => _pickFolder(queue),
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('Change'),
-                  ),
-                  if (queue.destinationOverride != null) ...[
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _resetFolder(queue),
-                      child: const Text('Reset'),
+                  // Choosing a folder needs a desktop directory picker; on
+                  // Android and iOS there is none, so downloads always go to the
+                  // app's own storage and the button would do nothing.
+                  if (!Platform.isAndroid && !Platform.isIOS) ...[
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => _pickFolder(queue),
+                      icon: const Icon(Icons.folder_open, size: 18),
+                      label: const Text('Change'),
                     ),
+                    if (queue.destinationOverride != null) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => _resetFolder(queue),
+                        child: const Text('Reset'),
+                      ),
+                    ],
                   ],
                 ],
               ),
               const SizedBox(height: 8),
               Text(
                 queue.destinationOverride == null
-                    ? 'Default location. Files are named '
-                          '"Artists - Title (Mix)".'
+                    ? (Platform.isAndroid || Platform.isIOS
+                          ? 'Saved in the app storage, reachable from the Files '
+                                'app. Named "Artists - Title (Mix)".'
+                          : 'Default location. Files are named '
+                                '"Artists - Title (Mix)".')
                     : 'Custom location.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -178,10 +186,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
         ),
-        _Section(
-          title: 'Preview',
-          child: _PreviewSetting(),
-        ),
+        _Section(title: 'Preview', child: _PreviewSetting()),
         _Section(
           title: 'Appearance',
           child: Column(
@@ -219,10 +224,7 @@ class _SettingsPageState extends State<SettingsPage> {
           title: 'Organisation',
           child: _OrganisationSetting(queue: queue),
         ),
-        _Section(
-          title: 'ffmpeg',
-          child: const _FfmpegSetting(),
-        ),
+        _Section(title: 'ffmpeg', child: const _FfmpegSetting()),
       ],
     );
   }
@@ -681,18 +683,15 @@ class _FfmpegSetting extends StatelessWidget {
                 : null,
           ),
           const SizedBox(height: 6),
-          Text(
-            switch (progress?.stage) {
-              InstallStage.downloading =>
-                'Downloading ${_mb(progress!.received)} of '
-                    '${_mb(progress.total)}',
-              InstallStage.verifying => 'Verifying checksum...',
-              InstallStage.extracting => 'Extracting...',
-              InstallStage.done => 'Installed.',
-              null => 'Starting...',
-            },
-            style: theme.textTheme.bodySmall,
-          ),
+          Text(switch (progress?.stage) {
+            InstallStage.downloading =>
+              'Downloading ${_mb(progress!.received)} of '
+                  '${_mb(progress.total)}',
+            InstallStage.verifying => 'Verifying checksum...',
+            InstallStage.extracting => 'Extracting...',
+            InstallStage.done => 'Installed.',
+            null => 'Starting...',
+          }, style: theme.textTheme.bodySmall),
         ],
         if (queue.installError != null) ...[
           const SizedBox(height: 8),
