@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
+import { Box, Chip, IconButton, Paper, Typography } from '@mui/material'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import PauseIcon from '@mui/icons-material/Pause'
+import SkipNextIcon from '@mui/icons-material/SkipNext'
+import CloseIcon from '@mui/icons-material/Close'
 import { camelotColor } from './api'
 import type { Track } from './api'
 
 function clock(seconds: number): string {
   if (!isFinite(seconds)) return '0:00'
   const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, '0')
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0')
   return `${m}:${s}`
 }
 
@@ -35,12 +38,11 @@ export function WavePlayer({
   const [time, setTime] = useState(0)
   const [dur, setDur] = useState(0)
 
-  // Create the wavesurfer instance once.
   useEffect(() => {
     if (!containerRef.current) return
     const ws = WaveSurfer.create({
       container: containerRef.current,
-      height: 44,
+      height: 40,
       waveColor: '#b7d5c6',
       progressColor: '#0b8f57',
       cursorColor: '#04663f',
@@ -64,7 +66,6 @@ export function WavePlayer({
     return () => ws.destroy()
   }, [])
 
-  // Load whenever the track changes.
   useEffect(() => {
     const ws = wsRef.current
     if (!ws || !track) return
@@ -75,55 +76,59 @@ export function WavePlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.id])
 
+  const keyColor = camelotColor(track?.key ?? null)
+
   return (
-    <footer className={track ? 'player active' : 'player'}>
-      <div className="player-row">
-        <button
-          className="pp"
-          onClick={() => wsRef.current?.playPause()}
-          disabled={loading}
-          title={playing ? 'Pause' : 'Play'}
-        >
-          {loading ? '…' : playing ? '❚❚' : '▶'}
-        </button>
-        <div className="wave-wrap">
-          <div className="now-title">
-            {track ? (
-              <>
-                {track.key && (
-                  <span
-                    className="key sm"
-                    style={(() => {
-                      const c = camelotColor(track.key)
-                      return c ? { background: c.bg, color: c.fg } : undefined
-                    })()}
-                  >
-                    {track.key}
-                  </span>
-                )}
-                <span className="t">{track.title}</span>
-                <span className="a">{track.artists}</span>
-              </>
-            ) : (
-              'Nothing playing'
+    <Paper
+      square
+      elevation={4}
+      sx={{
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: track ? 'block' : 'none',
+        px: 1.5,
+        py: 1,
+        pb: 'calc(8px + env(safe-area-inset-bottom))',
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <IconButton color="primary" disabled={loading} onClick={() => wsRef.current?.playPause()}>
+          {playing ? <PauseIcon /> : <PlayArrowIcon />}
+        </IconButton>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
+            {track?.key && keyColor && (
+              <Chip
+                size="small"
+                label={track.key}
+                sx={{ bgcolor: keyColor.bg, color: keyColor.fg, fontWeight: 700, height: 20 }}
+              />
             )}
-          </div>
-          <div ref={containerRef} className="wave" />
-        </div>
-        <div className="clock">
+            <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+              {track?.title}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {track?.artists}
+            </Typography>
+          </Box>
+          <div ref={containerRef} style={{ cursor: 'pointer' }} />
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
           {clock(time)} / {clock(dur)}
-        </div>
-        <button
-          className={autoplay ? 'auto on' : 'auto'}
+        </Typography>
+        <IconButton
+          color={autoplay ? 'primary' : 'default'}
           onClick={onToggleAutoplay}
           title={autoplay ? 'Autoplay on' : 'Autoplay off'}
         >
-          ⏭
-        </button>
-        <button className="close" onClick={onClose} title="Stop">
-          ✕
-        </button>
-      </div>
-    </footer>
+          <SkipNextIcon />
+        </IconButton>
+        <IconButton onClick={onClose} title="Stop">
+          <CloseIcon />
+        </IconButton>
+      </Box>
+    </Paper>
   )
 }
