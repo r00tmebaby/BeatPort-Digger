@@ -62,10 +62,19 @@ class PreviewPlayer extends ChangeNotifier {
         _notify();
       }),
       _player.stream.completed.listen((value) {
-        if (value) {
-          current = null;
-          _notify();
+        if (!value) return;
+        // Roll on to the next track in the list when autoplay is on, so a set
+        // can be auditioned hands-free; otherwise just clear the transport.
+        final finished = current;
+        if (_autoplay && finished != null) {
+          final next = _nextAfter(finished);
+          if (next != null) {
+            _playInList(next);
+            return;
+          }
         }
+        current = null;
+        _notify();
       }),
     ]);
   }
@@ -87,6 +96,39 @@ class PreviewPlayer extends ChangeNotifier {
 
   /// How far the preview fetch has got, while loading.
   double loadProgress = 0;
+
+  /// Whether a finished preview rolls on to the next track in the list.
+  bool _autoplay = true;
+  bool get autoplay => _autoplay;
+  set autoplay(bool value) {
+    _autoplay = value;
+    _notify();
+  }
+
+  /// The list autoplay steps through, set when playback starts so "next"
+  /// follows the list the user played from. [_upNextFiles] maps a track id to a
+  /// local file path when the list is downloaded tracks, so autoplay plays the
+  /// file rather than streaming a preview.
+  List<Track> _upNext = const [];
+  Map<int, String> _upNextFiles = const {};
+  void setUpNext(List<Track> tracks, {Map<int, String> files = const {}}) {
+    _upNext = tracks;
+    _upNextFiles = files;
+  }
+
+  /// The track after [track] in [_upNext], or null at the end of the list.
+  Track? _nextAfter(Track track) {
+    final index = _upNext.indexWhere((t) => t.id == track.id);
+    if (index < 0 || index + 1 >= _upNext.length) return null;
+    return _upNext[index + 1];
+  }
+
+  /// Plays [track] the way its list plays it: a downloaded file when one is
+  /// known for it, otherwise a streamed preview.
+  Future<void> _playInList(Track track) {
+    final path = _upNextFiles[track.id];
+    return path != null ? playLocal(track, path) : toggle(track);
+  }
 
   /// The track being previewed, if any.
   Track? current;
@@ -116,8 +158,7 @@ class PreviewPlayer extends ChangeNotifier {
     );
   }
 
-  bool isCurrent(Track track) =>
-      current?.id != null && current?.id == track.id;
+  bool isCurrent(Track track) => current?.id != null && current?.id == track.id;
 
   void _notify() {
     if (_disposed) return;
@@ -148,9 +189,7 @@ class PreviewPlayer extends ChangeNotifier {
       if (downloader == null) throw StateError('player is not bound');
 
       final directory = await _cacheDirectory();
-      final cached = File(
-        '${directory.path}${Platform.pathSeparator}$id.aac',
-      );
+      final cached = File('${directory.path}${Platform.pathSeparator}$id.aac');
       // Re-previewing a track should not re-fetch it.
       final file = await cached.exists()
           ? cached
@@ -172,6 +211,42 @@ class PreviewPlayer extends ChangeNotifier {
     } on Object catch (exception) {
       if (current?.id == id) {
         error = _friendlyError(exception);
+        current = null;
+      }
+    } finally {
+      if (current?.id == id) loading = false;
+      _notify();
+    }
+  }
+
+  /// Plays a downloaded file from [path], or pauses it when it is already
+  /// playing. Unlike [toggle] there is nothing to fetch: the file is on disk.
+  Future<void> playLocal(Track track, String path) async {
+    final id = track.id;
+    if (id == null) return;
+
+    if (isCurrent(track)) {
+      await (playing ? _player.pause() : _player.play());
+      return;
+    }
+
+    current = track;
+    loading = true;
+    loadProgress = 1;
+    error = null;
+    position = Duration.zero;
+    duration = Duration.zero;
+    _notify();
+
+    try {
+      if (!await File(path).exists()) {
+        throw const FileSystemException('The downloaded file is missing.');
+      }
+      if (current?.id != id) return;
+      await _player.open(Media(path));
+    } on Object {
+      if (current?.id == id) {
+        error = 'Could not play the downloaded file.';
         current = null;
       }
     } finally {

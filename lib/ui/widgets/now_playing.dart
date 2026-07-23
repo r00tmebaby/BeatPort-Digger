@@ -61,18 +61,40 @@ class NowPlayingBar extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // A thin seek bar across the top, so the row below stays readable.
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-            ),
-            child: Slider(
-              value: player.progress.clamp(0.0, 1.0),
-              onChanged: player.duration.inMilliseconds == 0
-                  ? null
-                  : player.seek,
+          // Seek row: elapsed time, a grabbable slider to scrub with, then the
+          // track length, so it reads at a glance where the preview is.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Row(
+              children: [
+                Text(
+                  _clock(player.position),
+                  style: theme.textTheme.labelSmall,
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 4,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 7,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 16,
+                      ),
+                    ),
+                    child: Slider(
+                      value: player.progress.clamp(0.0, 1.0),
+                      onChanged: player.duration.inMilliseconds == 0
+                          ? null
+                          : player.seek,
+                    ),
+                  ),
+                ),
+                Text(
+                  _clock(player.duration),
+                  style: theme.textTheme.labelSmall,
+                ),
+              ],
             ),
           ),
           Padding(
@@ -117,36 +139,37 @@ class NowPlayingBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                if (player.loading)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          // Determinate once the first segment lands, so a
-                          // whole-track fetch does not look stalled.
-                          value: player.loadProgress > 0
-                              ? player.loadProgress
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Loading ${(player.loadProgress * 100).round()}%',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ],
-                  )
-                else
-                  Text(
-                    '${_clock(player.position)} / ${_clock(player.duration)}',
-                    style: theme.textTheme.labelSmall,
+                if (player.loading) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      // Determinate once the first segment lands, so a
+                      // whole-track fetch does not look stalled.
+                      value: player.loadProgress > 0
+                          ? player.loadProgress
+                          : null,
+                    ),
                   ),
-                const SizedBox(width: 8),
+                ],
+                // Autoplay: when on, the next track in the list plays
+                // automatically once this preview ends.
+                IconButton(
+                  tooltip: player.autoplay
+                      ? 'Autoplay on - plays the next track'
+                      : 'Autoplay off',
+                  icon: Icon(
+                    player.autoplay
+                        ? Icons.playlist_play
+                        : Icons.playlist_remove,
+                    color: player.autoplay
+                        ? scheme.primary
+                        : scheme.onSurfaceVariant,
+                  ),
+                  onPressed: () => player.autoplay = !player.autoplay,
+                ),
                 IconButton(
                   tooltip: 'Stop',
                   icon: const Icon(Icons.close, size: 20),
