@@ -1,39 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api, downloadTrack, harmonicNeighbours } from './api'
+import type { Genre, SearchResponse, Track } from './api'
+import { WavePlayer } from './WavePlayer'
 
-type Track = {
-  id: number
-  title: string
-  artists: string
-  label: string
-  genre: string
-  bpm: number | null
-  key: string | null
-  length: string | null
-  badges: string[]
-}
-
-type SearchResponse = {
-  count: number
-  hasNext: boolean
-  results: Track[]
-}
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`)
-  return data as T
-}
-
-function Logo() {
+function Logo({ size = 26 }: { size?: number }) {
   return (
-    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
       {[6, 9, 12, 15, 18].map((x, i) => {
         const h = [8, 13, 18, 13, 8][i]
-        return <rect key={x} x={x - 1.3} y={(24 - h) / 2} width="2.6" height={h} rx="1.3" fill="#01ff95" />
+        return <rect key={x} x={x - 1.3} y={(24 - h) / 2} width="2.6" height={h} rx="1.3" fill="#0b8f57" />
       })}
     </svg>
   )
@@ -50,10 +25,7 @@ function Login({ onDone }: { onDone: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      await api('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
-      })
+      await api('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) })
       onDone()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed')
@@ -65,7 +37,7 @@ function Login({ onDone }: { onDone: () => void }) {
   return (
     <form className="login" onSubmit={submit}>
       <div className="brand big">
-        <Logo />
+        <Logo size={30} />
         <span>BeatPort Digger</span>
       </div>
       <p className="muted">Sign in with your Beatport account</p>
@@ -78,16 +50,60 @@ function Login({ onDone }: { onDone: () => void }) {
   )
 }
 
+const SORTS = [
+  ['-publish_date', 'Newest'],
+  ['publish_date', 'Oldest'],
+  ['-plays', 'Most played'],
+  ['-downloads', 'Most downloaded'],
+  ['name', 'Title'],
+  ['bpm', 'BPM'],
+]
+
+function Wheel({ selected, onPick }: { selected: string; onPick: (code: string) => void }) {
+  const neighbours = harmonicNeighbours(selected)
+  const codes: string[] = []
+  for (let n = 1; n <= 12; n++) for (const l of ['A', 'B']) codes.push(`${n}${l}`)
+  return (
+    <div className="wheel">
+      {codes.map((c) => {
+        const cls = c === selected ? 'k sel' : neighbours.includes(c) ? 'k compat' : 'k'
+        return (
+          <button key={c} className={cls} onClick={() => onPick(c)}>
+            {c}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
+  const [tab, setTab] = useState<'search' | 'harmonic'>('search')
+  const [genres, setGenres] = useState<Genre[]>([])
+
+  // Search state.
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
+  const [label, setLabel] = useState('')
+  const [genre, setGenre] = useState('')
+  const [bpmLow, setBpmLow] = useState('')
+  const [bpmHigh, setBpmHigh] = useState('')
+  const [sort, setSort] = useState('-publish_date')
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Harmonic state.
+  const [selKey, setSelKey] = useState('8A')
+  const [hGenre, setHGenre] = useState('')
+  const [hBpmLow, setHBpmLow] = useState('')
+  const [hBpmHigh, setHBpmHigh] = useState('')
+
   const [results, setResults] = useState<Track[]>([])
-  const [searching, setSearching] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [current, setCurrent] = useState<Track | null>(null)
   const [autoplay, setAutoplay] = useState(true)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  const [downloading, setDownloading] = useState<number | null>(null)
 
   useEffect(() => {
     api<{ authenticated: boolean }>('/api/status')
@@ -95,40 +111,83 @@ export default function App() {
       .catch(() => setAuthed(false))
   }, [])
 
-  async function search(e?: React.FormEvent) {
+  useEffect(() => {
+    if (!authed) return
+    api<{ genres: Genre[] }>('/api/genres')
+      .then((g) => setGenres(g.genres))
+      .catch(() => {})
+  }, [authed])
+
+  async function runSearch(e?: React.FormEvent) {
     e?.preventDefault()
-    setSearching(true)
+    setBusy(true)
     setError(null)
     try {
-      const params = new URLSearchParams()
-      if (title.trim()) params.set('title', title.trim())
-      if (artist.trim()) params.set('artist', artist.trim())
-      const data = await api<SearchResponse>(`/api/search?${params.toString()}`)
+      const p = new URLSearchParams()
+      if (title.trim()) p.set('title', title.trim())
+      if (artist.trim()) p.set('artist', artist.trim())
+      if (label.trim()) p.set('label', label.trim())
+      if (genre) p.set('genre', genre)
+      if (bpmLow.trim()) p.set('bpmLow', bpmLow.trim())
+      if (bpmHigh.trim()) p.set('bpmHigh', bpmHigh.trim())
+      p.set('sort', sort)
+      const data = await api<SearchResponse>(`/api/search?${p.toString()}`)
       setResults(data.results)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed')
     } finally {
-      setSearching(false)
+      setBusy(false)
     }
   }
 
-  function play(track: Track) {
-    setCurrent(track)
-    const audio = audioRef.current
-    if (audio) {
-      audio.src = `/api/preview/${track.id}`
-      audio.play().catch(() => {})
+  async function runHarmonic() {
+    setBusy(true)
+    setError(null)
+    try {
+      const p = new URLSearchParams({ key: selKey })
+      if (hGenre) p.set('genre', hGenre)
+      if (hBpmLow.trim()) p.set('bpmLow', hBpmLow.trim())
+      if (hBpmHigh.trim()) p.set('bpmHigh', hBpmHigh.trim())
+      const data = await api<SearchResponse>(`/api/harmonic?${p.toString()}`)
+      setResults(data.results)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Harmonic search failed')
+    } finally {
+      setBusy(false)
     }
   }
 
   function playNext() {
     if (!autoplay || !current) return
     const i = results.findIndex((t) => t.id === current.id)
-    if (i >= 0 && i + 1 < results.length) play(results[i + 1])
+    if (i >= 0 && i + 1 < results.length) setCurrent(results[i + 1])
+  }
+
+  async function download(t: Track) {
+    setDownloading(t.id)
+    setError(null)
+    try {
+      await downloadTrack(t)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setDownloading(null)
+    }
   }
 
   if (authed === null) return <div className="loading">Loading…</div>
   if (!authed) return <Login onDone={() => setAuthed(true)} />
+
+  const genreOptions = (value: string, set: (v: string) => void) => (
+    <select value={value} onChange={(e) => set(e.target.value)}>
+      <option value="">Any genre</option>
+      {genres.map((g) => (
+        <option key={g.id} value={g.id}>
+          {g.name}
+        </option>
+      ))}
+    </select>
+  )
 
   return (
     <div className="app">
@@ -137,26 +196,73 @@ export default function App() {
           <Logo />
           <span>BeatPort Digger</span>
         </div>
+        <div className="tabs">
+          <button className={tab === 'search' ? 'on' : ''} onClick={() => setTab('search')}>
+            Search
+          </button>
+          <button className={tab === 'harmonic' ? 'on' : ''} onClick={() => setTab('harmonic')}>
+            Harmonic
+          </button>
+        </div>
       </header>
 
-      <form className="searchbar" onSubmit={search}>
-        <input placeholder="Search title" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input placeholder="Artist" value={artist} onChange={(e) => setArtist(e.target.value)} />
-        <button disabled={searching}>{searching ? '…' : 'Search'}</button>
-      </form>
+      {tab === 'search' ? (
+        <form className="controls" onSubmit={runSearch}>
+          <div className="searchbar">
+            <input placeholder="Search title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <button type="button" className="ghost" onClick={() => setShowFilters((s) => !s)}>
+              Filters
+            </button>
+            <button disabled={busy}>{busy ? '…' : 'Search'}</button>
+          </div>
+          {showFilters && (
+            <div className="filters">
+              <input placeholder="Artist" value={artist} onChange={(e) => setArtist(e.target.value)} />
+              <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
+              {genreOptions(genre, setGenre)}
+              <input className="bpm" placeholder="BPM min" value={bpmLow} onChange={(e) => setBpmLow(e.target.value)} />
+              <input className="bpm" placeholder="BPM max" value={bpmHigh} onChange={(e) => setBpmHigh(e.target.value)} />
+              <select value={sort} onChange={(e) => setSort(e.target.value)}>
+                {SORTS.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </form>
+      ) : (
+        <div className="controls">
+          <div className="hrow">
+            <span className="muted">Mixing out of</span> <strong>{selKey}</strong>
+          </div>
+          <Wheel selected={selKey} onPick={setSelKey} />
+          <div className="filters">
+            {genreOptions(hGenre, setHGenre)}
+            <input className="bpm" placeholder="BPM min" value={hBpmLow} onChange={(e) => setHBpmLow(e.target.value)} />
+            <input className="bpm" placeholder="BPM max" value={hBpmHigh} onChange={(e) => setHBpmHigh(e.target.value)} />
+            <button onClick={runHarmonic} disabled={busy}>
+              {busy ? '…' : 'Find compatible'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error banner">{error}</div>}
 
       <main>
-        {results.length === 0 && !searching && (
-          <div className="muted center">Search for a title or artist to get started.</div>
+        {results.length === 0 && !busy && (
+          <div className="muted center">
+            {tab === 'search' ? 'Search for a title or artist to get started.' : 'Pick a key and find compatible tracks.'}
+          </div>
         )}
         <ul className="tracks">
           {results.map((t) => {
             const playing = current?.id === t.id
             return (
               <li key={t.id} className={playing ? 'playing' : ''}>
-                <button className="play" onClick={() => play(t)} title="Preview">
+                <button className="play" onClick={() => setCurrent(t)} title="Preview">
                   {playing ? '❚❚' : '▶'}
                 </button>
                 {t.key && <span className="key">{t.key}</span>}
@@ -167,32 +273,23 @@ export default function App() {
                     {t.label ? ` · ${t.label}` : ''}
                   </div>
                 </div>
-                <span className="bpm">{t.bpm ? `${t.bpm} BPM` : ''}</span>
+                <span className="bpm-tag">{t.bpm ? `${t.bpm}` : ''}</span>
+                <button className="dl" onClick={() => download(t)} disabled={downloading === t.id} title="Download">
+                  {downloading === t.id ? '…' : '↓'}
+                </button>
               </li>
             )
           })}
         </ul>
       </main>
 
-      <footer className={current ? 'player active' : 'player'}>
-        {current && (
-          <div className="now">
-            {current.key && <span className="key">{current.key}</span>}
-            <div className="meta">
-              <div className="title">{current.title}</div>
-              <div className="sub">{current.artists}</div>
-            </div>
-            <button
-              className={autoplay ? 'auto on' : 'auto'}
-              onClick={() => setAutoplay((a) => !a)}
-              title={autoplay ? 'Autoplay on' : 'Autoplay off'}
-            >
-              ⏭
-            </button>
-          </div>
-        )}
-        <audio ref={audioRef} controls onEnded={playNext} />
-      </footer>
+      <WavePlayer
+        track={current}
+        autoplay={autoplay}
+        onToggleAutoplay={() => setAutoplay((a) => !a)}
+        onEnded={playNext}
+        onClose={() => setCurrent(null)}
+      />
     </div>
   )
 }

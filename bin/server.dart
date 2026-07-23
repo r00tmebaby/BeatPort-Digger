@@ -148,6 +148,57 @@ Future<Response> _search(Request request) async {
   }
 }
 
+/// Camelot codes that mix harmonically with [code]: same key, +/-1, relative.
+List<String> _harmonicNeighbours(String code) {
+  final match = RegExp(r'^(\d{1,2})([AB])$').firstMatch(code.toUpperCase());
+  if (match == null) return const [];
+  final number = int.parse(match.group(1)!);
+  if (number < 1 || number > 12) return const [];
+  final letter = match.group(2)!;
+  final up = number % 12 + 1;
+  final down = (number - 2) % 12 + 1;
+  final opposite = letter == 'A' ? 'B' : 'A';
+  return ['$number$letter', '$up$letter', '$down$letter', '$number$opposite'];
+}
+
+Future<Response> _harmonic(Request request) async {
+  final catalog = _catalog;
+  if (catalog == null) return _error(401, 'Sign in first.');
+
+  final q = request.url.queryParameters;
+  final code = _blankToNull(q['key']) ?? '8A';
+  final bpmLow = q['bpmLow']?.trim() ?? '';
+  final bpmHigh = q['bpmHigh']?.trim() ?? '';
+  final bpm = (bpmLow.isEmpty && bpmHigh.isEmpty) ? null : '$bpmLow:$bpmHigh';
+  final genre = int.tryParse(q['genre'] ?? '');
+
+  try {
+    final grouped = await catalog.keyIdsByCamelot();
+    final ids = <int>[
+      for (final neighbour in _harmonicNeighbours(code)) ...?grouped[neighbour],
+    ];
+    if (ids.isEmpty) return _ok({'count': 0, 'hasNext': false, 'results': []});
+
+    final query = TrackQuery(
+      keyId: ids,
+      genreId: genre == null ? null : [genre],
+      bpm: bpm,
+      orderBy: '-publish_date',
+      perPage: 100,
+    );
+    final result = await catalog.tracks(query, page: 1);
+    return _ok({
+      'count': result.count,
+      'hasNext': result.next != null,
+      'results': result.results.map(_trackJson).toList(),
+    });
+  } on BeatportException catch (exception) {
+    return _error(exception.status, exception.toString());
+  } on Object catch (exception) {
+    return _error(500, 'Harmonic search failed: $exception');
+  }
+}
+
 Future<Response> _genres(Request request) async {
   final catalog = _catalog;
   if (catalog == null) return _error(401, 'Sign in first.');
@@ -244,6 +295,7 @@ Future<void> main(List<String> args) async {
     ..post('/api/login', _login)
     ..get('/api/status', _status)
     ..get('/api/search', _search)
+    ..get('/api/harmonic', _harmonic)
     ..get('/api/genres', _genres)
     ..get('/api/preview/<id>', _preview);
 
