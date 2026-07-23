@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for all release builds: the app talks to the Beatport API and
+         streams previews over the network. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Cratedigger"
         android:name="${applicationName}"
