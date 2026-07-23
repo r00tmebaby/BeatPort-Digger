@@ -22,18 +22,30 @@ import 'widgets/track_table.dart';
 /// name would miss every track filed under the other. The ids come from
 /// [Catalog.keyIdsByCamelot] instead.
 const Map<String, String> camelotToKeyName = {
-  '1A': 'Ab Minor', '1B': 'B Major',
-  '2A': 'Eb Minor', '2B': 'F# Major',
-  '3A': 'Bb Minor', '3B': 'Db Major',
-  '4A': 'F Minor', '4B': 'Ab Major',
-  '5A': 'C Minor', '5B': 'Eb Major',
-  '6A': 'G Minor', '6B': 'Bb Major',
-  '7A': 'D Minor', '7B': 'F Major',
-  '8A': 'A Minor', '8B': 'C Major',
-  '9A': 'E Minor', '9B': 'G Major',
-  '10A': 'B Minor', '10B': 'D Major',
-  '11A': 'F# Minor', '11B': 'A Major',
-  '12A': 'Db Minor', '12B': 'E Major',
+  '1A': 'Ab Minor',
+  '1B': 'B Major',
+  '2A': 'Eb Minor',
+  '2B': 'F# Major',
+  '3A': 'Bb Minor',
+  '3B': 'Db Major',
+  '4A': 'F Minor',
+  '4B': 'Ab Major',
+  '5A': 'C Minor',
+  '5B': 'Eb Major',
+  '6A': 'G Minor',
+  '6B': 'Bb Major',
+  '7A': 'D Minor',
+  '7B': 'F Major',
+  '8A': 'A Minor',
+  '8B': 'C Major',
+  '9A': 'E Minor',
+  '9B': 'G Major',
+  '10A': 'B Minor',
+  '10B': 'D Major',
+  '11A': 'F# Minor',
+  '11B': 'A Major',
+  '12A': 'Db Minor',
+  '12B': 'E Major',
 };
 
 /// Camelot codes that mix harmonically with [code]: same key, +/-1, relative.
@@ -86,8 +98,7 @@ class _HarmonicPageState extends State<HarmonicPage> {
       // included.
       final grouped = await session.catalog.keyIdsByCamelot();
       final ids = <int>[
-        for (final code in harmonicNeighbours(_selected))
-          ...?grouped[code],
+        for (final code in harmonicNeighbours(_selected)) ...?grouped[code],
       ];
       if (ids.isEmpty) {
         if (mounted) {
@@ -110,7 +121,9 @@ class _HarmonicPageState extends State<HarmonicPage> {
         orderBy: '-publish_date',
         perPage: 100,
       );
-      final found = await session.catalog.iterTracks(query, limit: 100).toList();
+      final found = await session.catalog
+          .iterTracks(query, limit: 100)
+          .toList();
       if (!mounted) return;
       setState(() {
         _results = found;
@@ -128,115 +141,120 @@ class _HarmonicPageState extends State<HarmonicPage> {
     final session = context.watch<Session>();
     final theme = Theme.of(context);
     final neighbours = harmonicNeighbours(_selected);
+    final narrow = MediaQuery.sizeOf(context).width < 600;
 
     // Laid out like Browse: every control sits at the top and the results take
-    // the rest of the window, rather than the search being pushed into the
-    // middle by a tall header above it.
+    // the rest of the window. On a phone the wheel and filters move into a
+    // bottom sheet behind a compact key bar, so the list keeps the screen.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 220,
-                    child: DropdownButtonFormField<Genre?>(
-                      key: ValueKey(_genre?.id),
-                      initialValue: _genre,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Genre',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: [
-                        const DropdownMenuItem<Genre?>(
-                          child: Text('Any genre'),
+        if (narrow)
+          _phoneBar(session, theme)
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 220,
+                      child: DropdownButtonFormField<Genre?>(
+                        key: ValueKey(_genre?.id),
+                        initialValue: _genre,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Genre',
+                          border: OutlineInputBorder(),
+                          isDense: true,
                         ),
-                        ...session.genres.map(
-                          (g) => DropdownMenuItem<Genre?>(
-                            value: g,
-                            child: Text(
-                              g.name ?? '',
-                              overflow: TextOverflow.ellipsis,
+                        items: [
+                          const DropdownMenuItem<Genre?>(
+                            child: Text('Any genre'),
+                          ),
+                          ...session.genres.map(
+                            (g) => DropdownMenuItem<Genre?>(
+                              value: g,
+                              child: Text(
+                                g.name ?? '',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ),
+                        ],
+                        onChanged: (value) => setState(() => _genre = value),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 96,
+                      child: TextField(
+                        controller: _bpmLow,
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) =>
+                            _loading ? null : _findCompatible(session),
+                        decoration: const InputDecoration(
+                          labelText: 'BPM min',
+                          border: OutlineInputBorder(),
+                          isDense: true,
                         ),
-                      ],
-                      onChanged: (value) => setState(() => _genre = value),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 96,
-                    child: TextField(
-                      controller: _bpmLow,
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) =>
-                          _loading ? null : _findCompatible(session),
-                      decoration: const InputDecoration(
-                        labelText: 'BPM min',
-                        border: OutlineInputBorder(),
-                        isDense: true,
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: 96,
-                    child: TextField(
-                      controller: _bpmHigh,
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) =>
-                          _loading ? null : _findCompatible(session),
-                      decoration: const InputDecoration(
-                        labelText: 'BPM max',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                    SizedBox(
+                      width: 96,
+                      child: TextField(
+                        controller: _bpmHigh,
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) =>
+                            _loading ? null : _findCompatible(session),
+                        decoration: const InputDecoration(
+                          labelText: 'BPM max',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
                       ),
                     ),
-                  ),
-                  FilledButton.icon(
-                    onPressed:
-                        _loading ? null : () => _findCompatible(session),
-                    icon: const Icon(Icons.auto_awesome, size: 18),
-                    label: const Text('Find compatible'),
-                  ),
-                  Text(
-                    'Mixing out of $_selected '
-                    '(${camelotToKeyName[_selected] ?? ''})',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    FilledButton.icon(
+                      onPressed: _loading
+                          ? null
+                          : () => _findCompatible(session),
+                      icon: const Icon(Icons.auto_awesome, size: 18),
+                      label: const Text('Find compatible'),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // The wheel is the key picker; compatible keys are highlighted.
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (var n = 1; n <= 12; n++)
-                    for (final letter in ['A', 'B'])
-                      _KeyButton(
-                        code: '$n$letter',
-                        selected: '$n$letter' == _selected,
-                        compatible: neighbours.contains('$n$letter'),
-                        onTap: () => setState(() => _selected = '$n$letter'),
+                    Text(
+                      'Mixing out of $_selected '
+                      '(${camelotToKeyName[_selected] ?? ''})',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                ],
-              ),
-            ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // The wheel is the key picker; compatible keys are highlighted.
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (var n = 1; n <= 12; n++)
+                      for (final letter in ['A', 'B'])
+                        _KeyButton(
+                          code: '$n$letter',
+                          selected: '$n$letter' == _selected,
+                          compatible: neighbours.contains('$n$letter'),
+                          onTap: () => setState(() => _selected = '$n$letter'),
+                        ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -250,18 +268,25 @@ class _HarmonicPageState extends State<HarmonicPage> {
               ? const Center(child: CircularProgressIndicator())
               : _results.isNotEmpty
               ? Consumer2<DownloadQueue, PreviewPlayer>(
-                  builder: (context, queue, player, _) => TrackTable(
-                    tracks: _results,
-                    onTap: (track) {
-                      if (_crate.contains(track)) return;
-                      setState(() => _crate.add(track));
-                    },
-                    onDownload: queue.enqueue,
-                    statusFor: (track) => queue.jobFor(track)?.status,
-                    onPlay: player.toggle,
-                    playingState: (track) => playbackStateFor(player, track),
-                    colourByStatus: queue.colourByStatus,
-                  ),
+                  builder: (context, queue, player, _) {
+                    return TrackTable(
+                      tracks: _results,
+                      onTap: (track) {
+                        if (_crate.contains(track)) return;
+                        setState(() => _crate.add(track));
+                      },
+                      onDownload: queue.enqueue,
+                      statusFor: (track) => queue.jobFor(track)?.status,
+                      onPlay: (track) {
+                        // Autoplay steps through the compatible tracks on
+                        // screen once this one finishes.
+                        player.setUpNext(_results);
+                        player.toggle(track);
+                      },
+                      playingState: (track) => playbackStateFor(player, track),
+                      colourByStatus: queue.colourByStatus,
+                    );
+                  },
                 )
               : Center(
                   child: Padding(
@@ -283,6 +308,171 @@ class _HarmonicPageState extends State<HarmonicPage> {
     );
   }
 
+  /// Phone layout: a single bar showing the chosen key and opening the wheel
+  /// and filters in a bottom sheet, plus a Find action.
+  Widget _phoneBar(Session session, ThemeData theme) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+    child: Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: () => _openKeyPicker(session),
+            icon: const Icon(Icons.piano, size: 18),
+            label: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Key $_selected · ${camelotToKeyName[_selected] ?? ''}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.icon(
+          onPressed: _loading ? null : () => _findCompatible(session),
+          icon: const Icon(Icons.auto_awesome, size: 18),
+          label: const Text('Find'),
+        ),
+      ],
+    ),
+  );
+
+  /// The Camelot wheel and filters in a bottom sheet, the phone's key picker.
+  Future<void> _openKeyPicker(Session session) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final media = MediaQuery.of(sheetContext);
+        return StatefulBuilder(
+          builder: (sheetContext, setSheet) {
+            final theme = Theme.of(sheetContext);
+            final neighbours = harmonicNeighbours(_selected);
+
+            Widget bpmField(TextEditingController controller, String label) =>
+                TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: label,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                );
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: media.size.height * 0.9),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    24 + media.viewPadding.bottom,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Key & filters',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const Spacer(),
+                          Text(
+                            '$_selected · ${camelotToKeyName[_selected] ?? ''}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // The wheel is the key picker; compatible keys highlight.
+                      Center(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            for (var n = 1; n <= 12; n++)
+                              for (final letter in ['A', 'B'])
+                                _KeyButton(
+                                  code: '$n$letter',
+                                  selected: '$n$letter' == _selected,
+                                  compatible: neighbours.contains('$n$letter'),
+                                  onTap: () {
+                                    setState(() => _selected = '$n$letter');
+                                    setSheet(() {});
+                                  },
+                                ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<Genre?>(
+                        key: ValueKey(_genre?.id),
+                        initialValue: _genre,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Genre',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          const DropdownMenuItem<Genre?>(
+                            child: Text('Any genre'),
+                          ),
+                          ...session.genres.map(
+                            (g) => DropdownMenuItem<Genre?>(
+                              value: g,
+                              child: Text(
+                                g.name ?? '',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _genre = value);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: bpmField(_bpmLow, 'BPM min')),
+                          const SizedBox(width: 12),
+                          Expanded(child: bpmField(_bpmHigh, 'BPM max')),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            _findCompatible(session);
+                          },
+                          icon: const Icon(Icons.auto_awesome, size: 18),
+                          label: const Text('Find compatible'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   /// A compact summary of the crate, so it does not consume list space.
   Widget _crateBar(ThemeData theme) => Material(
     color: theme.colorScheme.secondaryContainer,
@@ -297,10 +487,7 @@ class _HarmonicPageState extends State<HarmonicPage> {
             ),
           ),
           const SizedBox(width: 12),
-          TextButton(
-            onPressed: _showCrate,
-            child: const Text('View'),
-          ),
+          TextButton(onPressed: _showCrate, child: const Text('View')),
           const Spacer(),
           Consumer<DownloadQueue>(
             builder: (context, queue, _) => FilledButton.tonalIcon(

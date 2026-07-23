@@ -262,7 +262,9 @@ class _SearchTabState extends State<SearchTab> {
         setState(() => _error = exception.message.toString());
       }
     } on Exception catch (exception) {
-      if (mounted && _gate.isCurrent(ticket)) setState(() => _error = '$exception');
+      if (mounted && _gate.isCurrent(ticket)) {
+        setState(() => _error = '$exception');
+      }
     } finally {
       // Only the latest search owns the spinner; a stale one clearing it would
       // hide that a newer request is still running.
@@ -297,9 +299,9 @@ class _SearchTabState extends State<SearchTab> {
   }
 
   void _queued(int added) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Queued $added tracks.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Queued $added tracks.')));
   }
 
   /// Queues every track matching the filter across a date range.
@@ -394,74 +396,225 @@ class _SearchTabState extends State<SearchTab> {
     if (mounted) _queued(added);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final session = context.watch<Session>();
+  /// How many filters are active behind the Filters button, for its badge.
+  int get _filterCount {
+    var count = 0;
+    if (_trimmed(_artist) != null) count++;
+    if (_trimmed(_label) != null) count++;
+    if (_genre != null) count++;
+    if (_subGenre != null) count++;
+    if (_bpmRange() != null) count++;
+    count += _flags.length;
+    if (_exclusiveOnly) count++;
+    return count;
+  }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
+  /// The active filters as removable chips, built from the query state so each
+  /// knows how to clear itself. Shown under the search field on a phone.
+  List<Widget> _activeChips(Session session) {
+    final chips = <Widget>[];
+    void add(String label, VoidCallback onClear) => chips.add(
+      InputChip(
+        label: Text(label),
+        onDeleted: onClear,
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+
+    final artist = _trimmed(_artist);
+    if (artist != null) {
+      add('Artist: $artist', () {
+        _artist.clear();
+        setState(() {});
+        _searchNow(session);
+      });
+    }
+    final label = _trimmed(_label);
+    if (label != null) {
+      add('Label: $label', () {
+        _label.clear();
+        setState(() {});
+        _searchNow(session);
+      });
+    }
+    if (_genre != null) {
+      add('Genre: ${_genre!.name ?? ''}', () {
+        setState(() {
+          _genre = null;
+          _subGenre = null;
+          _subGenres = const [];
+        });
+        _searchNow(session);
+      });
+    }
+    if (_subGenre != null) {
+      add('Sub-genre: ${_subGenre!.name ?? ''}', () {
+        setState(() => _subGenre = null);
+        _searchNow(session);
+      });
+    }
+    if (_bpmRange() != null) {
+      add('BPM ${_bpmLow.text.trim()}-${_bpmHigh.text.trim()}', () {
+        _bpmLow.clear();
+        _bpmHigh.clear();
+        setState(() {});
+        _searchNow(session);
+      });
+    }
+    for (final flag in _flags.toList()) {
+      add(flag, () {
+        setState(() => _flags.remove(flag));
+        _searchNow(session);
+      });
+    }
+    if (_exclusiveOnly) {
+      add('Exclusive', () => setState(() => _exclusiveOnly = false));
+    }
+    return chips;
+  }
+
+  /// Phone layout: a pinned search field, a single Filters button opening a
+  /// bottom sheet, and the active filters as removable chips below.
+  List<Widget> _phoneControls(Session session) {
+    final chips = _activeChips(session);
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _name,
+                textInputAction: TextInputAction.search,
+                onChanged: (_) => _searchSoon(session),
+                onSubmitted: (_) => _loading ? null : _searchNow(session),
+                decoration: const InputDecoration(
+                  hintText: 'Search title',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Badge(
+              isLabelVisible: _filterCount > 0,
+              label: Text('$_filterCount'),
+              child: OutlinedButton.icon(
+                onPressed: () => _openFilters(session),
+                icon: const Icon(Icons.tune, size: 18),
+                label: const Text('Filters'),
+              ),
+            ),
+            if (_shown.isNotEmpty) _downloadsMenu(session),
+          ],
+        ),
+      ),
+      if (chips.isNotEmpty)
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: _Header(
-            session: session,
-            name: _name,
-            artist: _artist,
-            label: _label,
-            loading: _loading,
-            showAdvanced: _showAdvanced,
-            advancedCount: _advancedCount,
-            onToggleAdvanced: () =>
-                setState(() => _showAdvanced = !_showAdvanced),
-            genre: _genre,
-            subGenre: _subGenre,
-            subGenres: _subGenres,
-            bpmLow: _bpmLow,
-            bpmHigh: _bpmHigh,
-            orderBy: _orderBy,
-            perPage: _perPage,
-            onGenre: (genre) => _pickGenre(session, genre),
-            onSubGenre: (sub) {
-              setState(() => _subGenre = sub);
-              _searchNow(session);
-            },
-            onOrderBy: (value) {
-              setState(() => _orderBy = value);
-              _searchNow(session);
-            },
-            onPerPage: (value) {
-              setState(() => _perPage = value);
-              _searchNow(session);
-            },
-            onChanged: () => _searchSoon(session),
-            onRun: () => _searchNow(session),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Wrap(spacing: 6, runSpacing: 6, children: chips),
+        ),
+    ];
+  }
+
+  /// The download-everything options as an overflow menu, sat in the phone's
+  /// top bar next to Filters so the results need no separate action row.
+  Widget _downloadsMenu(Session session) {
+    final capped = _totalCount >= resultWindow;
+    final allLabel = _exclusiveOnly
+        ? 'Download all exclusive'
+        : 'Download all ${capped ? '$resultWindow+' : '$_totalCount'}';
+    return PopupMenuButton<String>(
+      tooltip: 'Download options',
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) {
+        final queue = context.read<DownloadQueue>();
+        switch (value) {
+          case 'all':
+            _queueAllMatching(session, queue);
+          case 'page':
+            _queued(queue.enqueueAll(_shown));
+          case 'beyond':
+            _queueEverything(session, queue);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'all',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.download),
+            title: Text(allLabel),
           ),
         ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: _ErrorBanner(message: _error!),
+        PopupMenuItem(
+          value: 'page',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.article_outlined),
+            title: Text('Download this page (${_shown.length})'),
           ),
-        if (_activeFilters.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text('Showing:', style: Theme.of(context).textTheme.bodySmall),
-                for (final filter in _activeFilters)
-                  Chip(
-                    label: Text(filter),
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-              ],
+        ),
+        if (capped)
+          const PopupMenuItem(
+            value: 'beyond',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.travel_explore),
+              title: Text('Reach beyond 10,000...'),
+              subtitle: Text('Walks the catalog by date window'),
             ),
           ),
-        // Real server-side flag filters, so they narrow every page, not just
-        // the loaded one. Only the three the API honours are offered.
+      ],
+    );
+  }
+
+  /// Wide layout: the full inline search form, unchanged from the desktop
+  /// design, with the flag chips shown beneath it.
+  List<Widget> _wideControls(Session session) {
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: _Header(
+          session: session,
+          name: _name,
+          artist: _artist,
+          label: _label,
+          loading: _loading,
+          showAdvanced: _showAdvanced,
+          advancedCount: _advancedCount,
+          onToggleAdvanced: () =>
+              setState(() => _showAdvanced = !_showAdvanced),
+          genre: _genre,
+          subGenre: _subGenre,
+          subGenres: _subGenres,
+          bpmLow: _bpmLow,
+          bpmHigh: _bpmHigh,
+          orderBy: _orderBy,
+          perPage: _perPage,
+          onGenre: (genre) => _pickGenre(session, genre),
+          onSubGenre: (sub) {
+            setState(() => _subGenre = sub);
+            _searchNow(session);
+          },
+          onOrderBy: (value) {
+            setState(() => _orderBy = value);
+            _searchNow(session);
+          },
+          onPerPage: (value) {
+            setState(() => _perPage = value);
+            _searchNow(session);
+          },
+          onChanged: () => _searchSoon(session),
+          onRun: () => _searchNow(session),
+        ),
+      ),
+      if (_activeFilters.isNotEmpty)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           child: Wrap(
@@ -469,48 +622,342 @@ class _SearchTabState extends State<SearchTab> {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(
-                'Only show:',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              for (final flag in _flagLabels)
-                FilterChip(
-                  label: Text(flag),
-                  selected: _flags.contains(flag),
+              Text('Showing:', style: Theme.of(context).textTheme.bodySmall),
+              for (final filter in _activeFilters)
+                Chip(
+                  label: Text(filter),
                   visualDensity: VisualDensity.compact,
-                  onSelected: (on) {
-                    setState(() {
-                      if (on) {
-                        _flags.add(flag);
-                      } else {
-                        _flags.remove(flag);
-                      }
-                    });
-                    _searchNow(session);
-                  },
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              // Exclusive has no server filter, so it narrows the loaded pages
-              // only. Tooltipped and count-labelled so that scope is clear.
-              Tooltip(
-                message: 'Beatport has no exclusive filter, so this narrows the '
-                    'results already loaded.',
-                child: FilterChip(
-                  avatar: _exclusiveOnly
-                      ? null
-                      : const Icon(Icons.filter_alt_outlined, size: 16),
-                  label: Text(
-                    _exclusiveOnly
-                        ? 'Exclusive (${_shown.length}/${_results.length})'
-                        : 'Exclusive',
-                  ),
-                  selected: _exclusiveOnly,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (on) => setState(() => _exclusiveOnly = on),
-                ),
-              ),
             ],
           ),
         ),
+      // Real server-side flag filters, so they narrow every page, not just the
+      // loaded one. Only the three the API honours are offered.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('Only show:', style: Theme.of(context).textTheme.bodySmall),
+            for (final flag in _flagLabels)
+              FilterChip(
+                label: Text(flag),
+                selected: _flags.contains(flag),
+                visualDensity: VisualDensity.compact,
+                onSelected: (on) {
+                  setState(() {
+                    if (on) {
+                      _flags.add(flag);
+                    } else {
+                      _flags.remove(flag);
+                    }
+                  });
+                  _searchNow(session);
+                },
+              ),
+            Tooltip(
+              message:
+                  'Beatport has no exclusive filter, so this narrows the '
+                  'results already loaded.',
+              child: FilterChip(
+                avatar: _exclusiveOnly
+                    ? null
+                    : const Icon(Icons.filter_alt_outlined, size: 16),
+                label: Text(
+                  _exclusiveOnly
+                      ? 'Exclusive (${_shown.length}/${_results.length})'
+                      : 'Exclusive',
+                ),
+                selected: _exclusiveOnly,
+                visualDensity: VisualDensity.compact,
+                onSelected: (on) => setState(() => _exclusiveOnly = on),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  /// The advanced filters in a bottom sheet, the phone's single entry point for
+  /// everything but the title search. Changes apply live behind the sheet.
+  Future<void> _openFilters(Session session) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final media = MediaQuery.of(sheetContext);
+        return StatefulBuilder(
+          builder: (sheetContext, setSheet) {
+            final theme = Theme.of(sheetContext);
+
+            Widget field(TextEditingController controller, String label) =>
+                TextField(
+                  controller: controller,
+                  textInputAction: TextInputAction.search,
+                  onChanged: (_) => _searchSoon(session),
+                  decoration: InputDecoration(
+                    labelText: label,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                );
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: media.size.height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  // Add the system navigation-bar inset so the Done button clears
+                  // the phone's on-screen buttons instead of hiding behind them.
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    24 + media.viewPadding.bottom,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text('Filters', style: theme.textTheme.titleMedium),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () {
+                              _artist.clear();
+                              _label.clear();
+                              _bpmLow.clear();
+                              _bpmHigh.clear();
+                              setState(() {
+                                _genre = null;
+                                _subGenre = null;
+                                _subGenres = const [];
+                                _flags.clear();
+                                _exclusiveOnly = false;
+                                _orderBy = '-publish_date';
+                                _perPage = 100;
+                              });
+                              setSheet(() {});
+                              _searchNow(session);
+                            },
+                            child: const Text('Reset'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      field(_artist, 'Artist'),
+                      const SizedBox(height: 12),
+                      field(_label, 'Label'),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<Genre?>(
+                        key: ValueKey(_genre?.id),
+                        initialValue: _genre,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Genre',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          const DropdownMenuItem<Genre?>(
+                            child: Text('Any genre'),
+                          ),
+                          ...session.genres.map(
+                            (g) => DropdownMenuItem<Genre?>(
+                              value: g,
+                              child: Text(
+                                g.name ?? '',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (g) async {
+                          await _pickGenre(session, g);
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<Named?>(
+                        key: ValueKey('${_genre?.id}:${_subGenre?.id}'),
+                        initialValue: _subGenre,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Sub-genre',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          const DropdownMenuItem<Named?>(
+                            child: Text('Any sub-genre'),
+                          ),
+                          ..._subGenres.map(
+                            (s) => DropdownMenuItem<Named?>(
+                              value: s,
+                              child: Text(
+                                s.name ?? '',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: _subGenres.isEmpty
+                            ? null
+                            : (s) {
+                                setState(() => _subGenre = s);
+                                setSheet(() {});
+                                _searchNow(session);
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: field(_bpmLow, 'BPM min')),
+                          const SizedBox(width: 12),
+                          Expanded(child: field(_bpmHigh, 'BPM max')),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(_orderBy),
+                        initialValue: _orderBy,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Sort by',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: '-publish_date',
+                            child: Text('Newest first'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'publish_date',
+                            child: Text('Oldest first'),
+                          ),
+                          DropdownMenuItem(
+                            value: '-plays',
+                            child: Text('Most played'),
+                          ),
+                          DropdownMenuItem(
+                            value: '-downloads',
+                            child: Text('Most downloaded'),
+                          ),
+                          DropdownMenuItem(value: 'name', child: Text('Title')),
+                          DropdownMenuItem(value: 'bpm', child: Text('BPM')),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _orderBy = value ?? '-publish_date');
+                          setSheet(() {});
+                          _searchNow(session);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        key: ValueKey(_perPage),
+                        initialValue: _perPage,
+                        decoration: const InputDecoration(
+                          labelText: 'Per page',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: const [25, 50, 100, 200]
+                            .map(
+                              (n) =>
+                                  DropdownMenuItem(value: n, child: Text('$n')),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setState(() => _perPage = value ?? 100);
+                          setSheet(() {});
+                          _searchNow(session);
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Text('Only show', style: theme.textTheme.labelLarge),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final flag in _flagLabels)
+                            FilterChip(
+                              label: Text(flag),
+                              selected: _flags.contains(flag),
+                              onSelected: (on) {
+                                setState(() {
+                                  if (on) {
+                                    _flags.add(flag);
+                                  } else {
+                                    _flags.remove(flag);
+                                  }
+                                });
+                                setSheet(() {});
+                                _searchNow(session);
+                              },
+                            ),
+                          FilterChip(
+                            avatar: _exclusiveOnly
+                                ? null
+                                : const Icon(
+                                    Icons.filter_alt_outlined,
+                                    size: 16,
+                                  ),
+                            label: Text(
+                              _exclusiveOnly
+                                  ? 'Exclusive (${_shown.length}/${_results.length})'
+                                  : 'Exclusive',
+                            ),
+                            selected: _exclusiveOnly,
+                            onSelected: (on) {
+                              setState(() => _exclusiveOnly = on);
+                              setSheet(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('Done'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<Session>();
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (narrow) ..._phoneControls(session) else ..._wideControls(session),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: _ErrorBanner(message: _error!),
+          ),
         // Contextual: only meaningful once there is something to act on.
         if (_shown.isNotEmpty)
           Consumer<DownloadQueue>(
@@ -532,6 +979,7 @@ class _SearchTabState extends State<SearchTab> {
               onDownloadThisPage: () => _queued(queue.enqueueAll(_shown)),
               onQueueBeyond: () => _queueEverything(session, queue),
               onClearSelection: () => setState(() => _selected = {}),
+              compact: narrow,
             ),
           ),
         const SizedBox(height: 8),
@@ -556,22 +1004,29 @@ class _SearchTabState extends State<SearchTab> {
                   ),
                 )
               : Consumer2<DownloadQueue, PreviewPlayer>(
-                  builder: (context, queue, player, _) => TrackTable(
-                    tracks: _shown,
-                    rankFor: _rankLabel == null
-                        ? null
-                        : (track) => _rank[track.id],
-                    rankLabel: _rankLabel,
-                    onDownload: queue.enqueue,
-                    statusFor: (track) => queue.jobFor(track)?.status,
-                    selected: _selected,
-                    onSelectionChanged: (next) =>
-                        setState(() => _selected = next),
-                    onPlay: player.toggle,
-                    playingState: (track) => playbackStateFor(player, track),
-                    colourByStatus: queue.colourByStatus,
-                    historyMarkFor: queue.historyMark,
-                  ),
+                  builder: (context, queue, player, _) {
+                    return TrackTable(
+                      tracks: _shown,
+                      rankFor: _rankLabel == null
+                          ? null
+                          : (track) => _rank[track.id],
+                      rankLabel: _rankLabel,
+                      onDownload: queue.enqueue,
+                      statusFor: (track) => queue.jobFor(track)?.status,
+                      selected: _selected,
+                      onSelectionChanged: (next) =>
+                          setState(() => _selected = next),
+                      onPlay: (track) {
+                        // Autoplay steps through the tracks on screen once this
+                        // one finishes.
+                        player.setUpNext(_shown);
+                        player.toggle(track);
+                      },
+                      playingState: (track) => playbackStateFor(player, track),
+                      colourByStatus: queue.colourByStatus,
+                      historyMarkFor: queue.historyMark,
+                    );
+                  },
                 ),
         ),
         if (_searched && _totalCount > 0) _pager(session),
@@ -628,7 +1083,10 @@ class _SearchTabState extends State<SearchTab> {
                   : () => _load(session, page: _page - 1),
               icon: const Icon(Icons.chevron_left),
             ),
-            Text('Page $_page of $_totalPages', style: theme.textTheme.bodySmall),
+            Text(
+              'Page $_page of $_totalPages',
+              style: theme.textTheme.bodySmall,
+            ),
             IconButton(
               tooltip: 'Next page',
               onPressed: _loading || !_hasNext
@@ -854,7 +1312,10 @@ class _Header extends StatelessWidget {
                               value: '-downloads',
                               child: Text('Most downloaded'),
                             ),
-                            DropdownMenuItem(value: 'name', child: Text('Title')),
+                            DropdownMenuItem(
+                              value: 'name',
+                              child: Text('Title'),
+                            ),
                             DropdownMenuItem(value: 'bpm', child: Text('BPM')),
                           ],
                           onChanged: (value) =>
@@ -916,6 +1377,7 @@ class _ActionBar extends StatelessWidget {
     required this.onDownloadThisPage,
     required this.onQueueBeyond,
     required this.onClearSelection,
+    required this.compact,
   });
 
   /// Tracks on the current page.
@@ -937,6 +1399,10 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback onDownloadThisPage;
   final VoidCallback onQueueBeyond;
   final VoidCallback onClearSelection;
+
+  /// Compact (phone) layout hides the wide "Download all" button and moves it
+  /// into the overflow menu, so the bar is just the count and the menu.
+  final bool compact;
 
   String get _allLabel {
     if (exclusiveActive) return 'Download all exclusive';
@@ -980,6 +1446,12 @@ class _ActionBar extends StatelessWidget {
     }
 
     final hasSelection = selectedCount > 0;
+
+    // On a phone the download-all / page / beyond actions live in the top bar's
+    // menu, and the track count is already shown by the pager, so this bar only
+    // appears when tracks are selected.
+    if (compact && !hasSelection) return const SizedBox.shrink();
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 0),
       child: Row(
@@ -994,10 +1466,7 @@ class _ActionBar extends StatelessWidget {
           ),
           if (hasSelection) ...[
             const SizedBox(width: 4),
-            TextButton(
-              onPressed: onClearSelection,
-              child: const Text('Clear'),
-            ),
+            TextButton(onPressed: onClearSelection, child: const Text('Clear')),
           ],
           const Spacer(),
           if (hasSelection)
@@ -1014,39 +1483,42 @@ class _ActionBar extends StatelessWidget {
               icon: const Icon(Icons.download, size: 18),
               label: Text(_allLabel),
             ),
-          PopupMenuButton<String>(
-            tooltip: 'More download options',
-            onSelected: (value) {
-              switch (value) {
-                case 'page':
-                  onDownloadThisPage();
-                case 'beyond':
-                  onQueueBeyond();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'page',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.article_outlined),
-                  title: Text('Download this page ($pageCount)'),
-                ),
-              ),
-              if (capped)
-                const PopupMenuItem(
-                  value: 'beyond',
+          // The overflow stays on desktop; on a phone the same options live in
+          // the top bar, so a selection bar needs no menu of its own.
+          if (!compact)
+            PopupMenuButton<String>(
+              tooltip: 'More download options',
+              onSelected: (value) {
+                switch (value) {
+                  case 'page':
+                    onDownloadThisPage();
+                  case 'beyond':
+                    onQueueBeyond();
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'page',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.travel_explore),
-                    title: Text('Reach beyond 10,000...'),
-                    subtitle: Text('Walks the catalog by date window'),
+                    leading: const Icon(Icons.article_outlined),
+                    title: Text('Download this page ($pageCount)'),
                   ),
                 ),
-            ],
-          ),
+                if (capped)
+                  const PopupMenuItem(
+                    value: 'beyond',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.travel_explore),
+                      title: Text('Reach beyond 10,000...'),
+                      subtitle: Text('Walks the catalog by date window'),
+                    ),
+                  ),
+              ],
+            ),
         ],
       ),
     );
