@@ -1,0 +1,162 @@
+/// The preview transport, shown while something is loaded.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../state/player.dart';
+import 'camelot.dart';
+
+String _clock(Duration value) {
+  final minutes = value.inMinutes;
+  final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
+class NowPlayingBar extends StatelessWidget {
+  const NowPlayingBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final player = context.watch<PreviewPlayer>();
+    final track = player.current;
+    if (track == null && player.error == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    if (track == null) {
+      // A missing preview is a fact about the track, not a failure of the app,
+      // so it reads as a neutral notice rather than a red error.
+      return Material(
+        color: scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  player.error ?? 'No preview available.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: player.stop,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // A thin seek bar across the top, so the row below stays readable.
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            ),
+            child: Slider(
+              value: player.progress.clamp(0.0, 1.0),
+              onChanged: player.duration.inMilliseconds == 0
+                  ? null
+                  : player.seek,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Row(
+              children: [
+                IconButton(
+                  iconSize: 34,
+                  icon: Icon(
+                    player.playing
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_filled,
+                    color: scheme.primary,
+                  ),
+                  onPressed: () => player.toggle(track),
+                ),
+                const SizedBox(width: 4),
+                CamelotChip(
+                  number: track.key?.camelotNumber,
+                  letter: track.key?.camelotLetter,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        track.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        track.artistNames,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                if (player.loading)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          // Determinate once the first segment lands, so a
+                          // whole-track fetch does not look stalled.
+                          value: player.loadProgress > 0
+                              ? player.loadProgress
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Loading ${(player.loadProgress * 100).round()}%',
+                        style: theme.textTheme.labelSmall,
+                      ),
+                    ],
+                  )
+                else
+                  Text(
+                    '${_clock(player.position)} / ${_clock(player.duration)}',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Stop',
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: player.stop,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
