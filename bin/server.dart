@@ -124,6 +124,11 @@ Future<Response> _login(Request request) async {
 
 Response _status(Request request) => _ok({'authenticated': _catalog != null});
 
+// A short-lived cache of identical searches, so paging back and forth or
+// repeating a query is instant instead of another round-trip to Beatport.
+final Map<String, ({DateTime at, String body})> _searchCache = {};
+const Duration _searchTtl = Duration(seconds: 120);
+
 Future<Response> _search(Request request) async {
   final catalog = _catalog;
   if (catalog == null) return _error(401, 'Sign in first.');
@@ -135,6 +140,14 @@ Future<Response> _search(Request request) async {
   final genre = int.tryParse(q['genre'] ?? '');
   final sort = _blankToNull(q['sort']) ?? '-publish_date';
   final page = int.tryParse(q['page'] ?? '1') ?? 1;
+  // Fewer results per page come back noticeably faster; the UI can ask for more.
+  final perPage = (int.tryParse(q['perPage'] ?? '') ?? 60).clamp(10, 150);
+
+  final cacheKey = request.url.query;
+  final cached = _searchCache[cacheKey];
+  if (cached != null && DateTime.now().difference(cached.at) < _searchTtl) {
+    return Response.ok(cached.body, headers: {..._json, ..._cors});
+  }
 
   final query = TrackQuery(
     name: _blankToNull(q['title']),
@@ -143,16 +156,19 @@ Future<Response> _search(Request request) async {
     genreId: genre == null ? null : [genre],
     bpm: bpm,
     orderBy: sort,
-    perPage: 100,
+    perPage: perPage,
   );
 
   try {
     final result = await catalog.tracks(query, page: page);
-    return _ok({
+    final body = jsonEncode({
       'count': result.count,
       'hasNext': result.next != null,
+      'page': page,
       'results': result.results.map(_trackJson).toList(),
     });
+    _searchCache[cacheKey] = (at: DateTime.now(), body: body);
+    return Response.ok(body, headers: {..._json, ..._cors});
   } on BeatportException catch (exception) {
     return _error(exception.status, exception.toString());
   } on Object catch (exception) {
