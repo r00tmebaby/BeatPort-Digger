@@ -54,8 +54,8 @@ final Directory _previewCache = Directory(
 );
 
 /// How many segments to fetch at once. The segments are independent, so pulling
-/// them in parallel is far faster than one after another.
-const int _segmentWindow = 12;
+/// more in parallel loads the preview faster, up to what the connection allows.
+const int _segmentWindow = 32;
 
 const Map<String, String> _cors = {
   'Access-Control-Allow-Origin': '*',

@@ -175,6 +175,13 @@ export default function App() {
   const [current, setCurrent] = useState<Track | null>(null)
   const [autoplay, setAutoplay] = useState(true)
   const [downloading, setDownloading] = useState<number | null>(null)
+  const [downloads, setDownloads] = useState<Track[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('bpd_downloads') || '[]') as Track[]
+    } catch {
+      return []
+    }
+  })
 
   const [sortKey, setSortKey] = useState<SortKey>('index')
   const [order, setOrder] = useState<Order>('asc')
@@ -186,8 +193,14 @@ export default function App() {
     if (!authed) return
     api<{ genres: Genre[] }>('/api/genres').then((g) => setGenres(g.genres)).catch(() => {})
   }, [authed])
+  useEffect(() => {
+    localStorage.setItem('bpd_downloads', JSON.stringify(downloads))
+  }, [downloads])
 
-  const sorted = useMemo(() => sortTracks(results, sortKey, order), [results, sortKey, order])
+  const rows = useMemo(
+    () => sortTracks(tab === 2 ? downloads : results, sortKey, order),
+    [tab, downloads, results, sortKey, order],
+  )
 
   function handleSort(key: SortKey) {
     if (key === sortKey) setOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
@@ -240,8 +253,8 @@ export default function App() {
 
   function playNext() {
     if (!autoplay || !current) return
-    const i = sorted.findIndex((t) => t.id === current.id)
-    if (i >= 0 && i + 1 < sorted.length) setCurrent(sorted[i + 1])
+    const i = rows.findIndex((t) => t.id === current.id)
+    if (i >= 0 && i + 1 < rows.length) setCurrent(rows[i + 1])
   }
 
   async function download(t: Track) {
@@ -249,6 +262,7 @@ export default function App() {
     setError(null)
     try {
       await downloadTrack(t)
+      setDownloads((d) => (d.some((x) => x.id === t.id) ? d : [t, ...d]))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     } finally {
@@ -262,19 +276,20 @@ export default function App() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />
 
   return (
-    <Box sx={{ pb: 12 }}>
-      <AppBar position="sticky" color="default" elevation={1}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <AppBar position="static" color="default" elevation={1}>
         <Toolbar variant="dense">
           <Logo />
           <Typography variant="h6" sx={{ fontWeight: 700, mr: 3 }}>BeatPort Digger</Typography>
           <Tabs value={tab} onChange={(_, v) => setTab(v)}>
             <Tab label="Search" />
             <Tab label="Harmonic" />
+            <Tab label={`Downloads${downloads.length ? ` (${downloads.length})` : ''}`} />
           </Tabs>
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ py: 2 }}>
+      <Box sx={{ px: 2, pt: 2 }}>
         {tab === 0 ? (
           <Box component="form" onSubmit={runSearch}>
             <Box sx={{ display: 'flex', gap: 1 }}>
@@ -297,7 +312,7 @@ export default function App() {
               </Box>
             </Collapse>
           </Box>
-        ) : (
+        ) : tab === 1 ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="body2" color="text.secondary">
               Mixing out of <strong>{selKey}</strong>
@@ -310,12 +325,23 @@ export default function App() {
               <Button variant="contained" onClick={runHarmonic} disabled={busy}>Find compatible</Button>
             </Box>
           </Box>
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              {downloads.length} downloaded this device
+            </Typography>
+            {downloads.length > 0 && (
+              <Button size="small" color="inherit" onClick={() => setDownloads([])}>Clear list</Button>
+            )}
+          </Box>
         )}
 
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </Box>
 
-        <Paper variant="outlined" sx={{ mt: 2, overflow: 'hidden' }}>
-          <TableContainer sx={{ maxHeight: 'calc(100vh - 300px)' }}>
+      <Box sx={{ flex: 1, minHeight: 0, px: 2, pt: 2, pb: current ? 12 : 2 }}>
+        <Paper variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <TableContainer sx={{ flex: 1 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
@@ -339,7 +365,7 @@ export default function App() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {sorted.map((t, i) => {
+                {rows.map((t, i) => {
                   const playing = current?.id === t.id
                   const kc = camelotColor(t.key)
                   return (
@@ -372,13 +398,19 @@ export default function App() {
               </TableBody>
             </Table>
           </TableContainer>
-          {sorted.length === 0 && (
+          {rows.length === 0 && (
             <Typography color="text.secondary" sx={{ p: 4, textAlign: 'center' }}>
-              {busy ? 'Searching…' : tab === 0 ? 'Search for a title or artist to get started.' : 'Pick a key and find compatible tracks.'}
+              {busy
+                ? 'Searching…'
+                : tab === 0
+                  ? 'Search for a title or artist to get started.'
+                  : tab === 1
+                    ? 'Pick a key and find compatible tracks.'
+                    : 'Tracks you download appear here.'}
             </Typography>
           )}
         </Paper>
-      </Container>
+      </Box>
 
       <WavePlayer
         track={current}
