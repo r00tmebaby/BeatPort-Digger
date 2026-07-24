@@ -10,6 +10,7 @@ import {
   Container,
   IconButton,
   MenuItem,
+  Pagination,
   Paper,
   Tab,
   Table,
@@ -43,6 +44,26 @@ const SORTS: [string, string][] = [
   ['name', 'Title'],
   ['bpm', 'BPM'],
 ]
+
+// A useState that mirrors to localStorage, so search state survives a refresh.
+function usePersisted<T>(key: string, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw !== null ? (JSON.parse(raw) as T) : initial
+    } catch {
+      return initial
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+    } catch {
+      // storage full or unavailable; state still works for the session.
+    }
+  }, [key, value])
+  return [value, setValue]
+}
 
 function Logo() {
   return (
@@ -152,25 +173,29 @@ const COLUMNS: Column[] = [
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
-  const [tab, setTab] = useState(0)
+  const [tab, setTab] = usePersisted('bpd_tab', 0)
   const [genres, setGenres] = useState<Genre[]>([])
 
-  const [title, setTitle] = useState('')
-  const [artist, setArtist] = useState('')
-  const [label, setLabel] = useState('')
-  const [genre, setGenre] = useState('')
-  const [bpmLow, setBpmLow] = useState('')
-  const [bpmHigh, setBpmHigh] = useState('')
-  const [sort, setSort] = useState('-publish_date')
+  const [title, setTitle] = usePersisted('bpd_title', '')
+  const [artist, setArtist] = usePersisted('bpd_artist', '')
+  const [label, setLabel] = usePersisted('bpd_label', '')
+  const [genre, setGenre] = usePersisted('bpd_genre', '')
+  const [bpmLow, setBpmLow] = usePersisted('bpd_bpmLow', '')
+  const [bpmHigh, setBpmHigh] = usePersisted('bpd_bpmHigh', '')
+  const [sort, setSort] = usePersisted('bpd_sort', '-publish_date')
   const [showFilters, setShowFilters] = useState(false)
 
-  const [selKey, setSelKey] = useState('8A')
-  const [hGenre, setHGenre] = useState('')
-  const [hBpmLow, setHBpmLow] = useState('')
-  const [hBpmHigh, setHBpmHigh] = useState('')
+  const [selKey, setSelKey] = usePersisted('bpd_selKey', '8A')
+  const [hGenre, setHGenre] = usePersisted('bpd_hGenre', '')
+  const [hBpmLow, setHBpmLow] = usePersisted('bpd_hBpmLow', '')
+  const [hBpmHigh, setHBpmHigh] = usePersisted('bpd_hBpmHigh', '')
 
-  const [results, setResults] = useState<Track[]>([])
+  const [searchResults, setSearchResults] = usePersisted<Track[]>('bpd_searchResults', [])
+  const [harmonicResults, setHarmonicResults] = usePersisted<Track[]>('bpd_harmonicResults', [])
+  const [count, setCount] = usePersisted('bpd_count', 0)
+  const [page, setPage] = usePersisted('bpd_page', 1)
   const [busy, setBusy] = useState(false)
+  const [pStatus, setPStatus] = useState({ loading: false, playing: false })
   const [error, setError] = useState<string | null>(null)
   const [current, setCurrent] = useState<Track | null>(null)
   const [autoplay, setAutoplay] = useState(true)
@@ -198,8 +223,13 @@ export default function App() {
   }, [downloads])
 
   const rows = useMemo(
-    () => sortTracks(tab === 2 ? downloads : results, sortKey, order),
-    [tab, downloads, results, sortKey, order],
+    () =>
+      sortTracks(
+        tab === 2 ? downloads : tab === 1 ? harmonicResults : searchResults,
+        sortKey,
+        order,
+      ),
+    [tab, downloads, harmonicResults, searchResults, sortKey, order],
   )
 
   function handleSort(key: SortKey) {
@@ -210,21 +240,24 @@ export default function App() {
     }
   }
 
-  async function runSearch(e?: React.FormEvent) {
-    e?.preventDefault()
+  async function runSearch(nextPage = 1, overrides: Record<string, string> = {}) {
+    const f = { title, artist, label, genre, bpmLow, bpmHigh, sort, ...overrides }
     setBusy(true)
     setError(null)
     try {
       const p = new URLSearchParams()
-      if (title.trim()) p.set('title', title.trim())
-      if (artist.trim()) p.set('artist', artist.trim())
-      if (label.trim()) p.set('label', label.trim())
-      if (genre) p.set('genre', genre)
-      if (bpmLow.trim()) p.set('bpmLow', bpmLow.trim())
-      if (bpmHigh.trim()) p.set('bpmHigh', bpmHigh.trim())
-      p.set('sort', sort)
+      if (f.title.trim()) p.set('title', f.title.trim())
+      if (f.artist.trim()) p.set('artist', f.artist.trim())
+      if (f.label.trim()) p.set('label', f.label.trim())
+      if (f.genre) p.set('genre', f.genre)
+      if (f.bpmLow.trim()) p.set('bpmLow', f.bpmLow.trim())
+      if (f.bpmHigh.trim()) p.set('bpmHigh', f.bpmHigh.trim())
+      p.set('sort', f.sort)
+      p.set('page', String(nextPage))
       const data = await api<SearchResponse>(`/api/search?${p.toString()}`)
-      setResults(data.results)
+      setSearchResults(data.results)
+      setCount(data.count)
+      setPage(nextPage)
       setSortKey('index')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed')
@@ -232,6 +265,27 @@ export default function App() {
       setBusy(false)
     }
   }
+
+  // The active search filters, shown as removable chips in one row like the app.
+  const activeChips: { label: string; clear: () => void }[] = []
+  if (tab === 0) {
+    if (artist.trim()) activeChips.push({ label: `Artist: ${artist}`, clear: () => { setArtist(''); runSearch(1, { artist: '' }) } })
+    if (label.trim()) activeChips.push({ label: `Label: ${label}`, clear: () => { setLabel(''); runSearch(1, { label: '' }) } })
+    if (genre) {
+      const name = genres.find((g) => String(g.id) === genre)?.name ?? genre
+      activeChips.push({ label: `Genre: ${name}`, clear: () => { setGenre(''); runSearch(1, { genre: '' }) } })
+    }
+    if (bpmLow.trim() || bpmHigh.trim()) {
+      activeChips.push({ label: `BPM ${bpmLow || '…'}-${bpmHigh || '…'}`, clear: () => { setBpmLow(''); setBpmHigh(''); runSearch(1, { bpmLow: '', bpmHigh: '' }) } })
+    }
+    if (sort !== '-publish_date') {
+      const name = SORTS.find(([v]) => v === sort)?.[1] ?? sort
+      activeChips.push({ label: `Sort: ${name}`, clear: () => { setSort('-publish_date'); runSearch(1, { sort: '-publish_date' }) } })
+    }
+  }
+
+  const perPage = 60
+  const totalPages = Math.ceil(Math.min(count, 10000) / perPage)
 
   async function runHarmonic() {
     setBusy(true)
@@ -242,7 +296,7 @@ export default function App() {
       if (hBpmLow.trim()) p.set('bpmLow', hBpmLow.trim())
       if (hBpmHigh.trim()) p.set('bpmHigh', hBpmHigh.trim())
       const data = await api<SearchResponse>(`/api/harmonic?${p.toString()}`)
-      setResults(data.results)
+      setHarmonicResults(data.results)
       setSortKey('index')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Harmonic search failed')
@@ -291,7 +345,7 @@ export default function App() {
 
       <Box sx={{ px: 2, pt: 2 }}>
         {tab === 0 ? (
-          <Box component="form" onSubmit={runSearch}>
+          <Box component="form" onSubmit={(e) => { e.preventDefault(); runSearch(1) }}>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField fullWidth size="small" label="Search title" value={title} onChange={(e) => setTitle(e.target.value)} />
               <IconButton onClick={() => setShowFilters((s) => !s)} color={showFilters ? 'primary' : 'default'}>
@@ -311,6 +365,13 @@ export default function App() {
                 </TextField>
               </Box>
             </Collapse>
+            {activeChips.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0.75, mt: 1, overflowX: 'auto', pb: 0.5 }}>
+                {activeChips.map((c, i) => (
+                  <Chip key={i} label={c.label} onDelete={c.clear} size="small" sx={{ flex: 'none' }} />
+                ))}
+              </Box>
+            )}
           </Box>
         ) : tab === 1 ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -339,8 +400,8 @@ export default function App() {
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       </Box>
 
-      <Box sx={{ flex: 1, minHeight: 0, px: 2, pt: 2, pb: current ? 12 : 2 }}>
-        <Paper variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Box sx={{ flex: 1, minHeight: 0, px: 2, pt: 2, pb: current ? 12 : 2, display: 'flex', flexDirection: 'column' }}>
+        <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <TableContainer sx={{ flex: 1 }}>
             <Table size="small" stickyHeader>
               <TableHead>
@@ -372,7 +433,13 @@ export default function App() {
                     <TableRow key={t.id} hover selected={playing}>
                       <TableCell padding="checkbox">
                         <IconButton size="small" color="primary" onClick={() => setCurrent(t)}>
-                          {playing ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
+                          {playing && pStatus.loading ? (
+                            <CircularProgress size={16} />
+                          ) : playing && pStatus.playing ? (
+                            <PauseIcon fontSize="small" />
+                          ) : (
+                            <PlayArrowIcon fontSize="small" />
+                          )}
                         </IconButton>
                       </TableCell>
                       <TableCell>{i + 1}</TableCell>
@@ -410,6 +477,12 @@ export default function App() {
             </Typography>
           )}
         </Paper>
+        {tab === 0 && totalPages > 1 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2, py: 1 }}>
+            <Pagination count={totalPages} page={page} onChange={(_, p) => runSearch(p)} size="small" color="primary" />
+            <Typography variant="caption" color="text.secondary">{count.toLocaleString()} tracks</Typography>
+          </Box>
+        )}
       </Box>
 
       <WavePlayer
@@ -418,6 +491,7 @@ export default function App() {
         onToggleAutoplay={() => setAutoplay((a) => !a)}
         onEnded={playNext}
         onClose={() => setCurrent(null)}
+        onStatus={(loading, playing) => setPStatus({ loading, playing })}
       />
     </Box>
   )

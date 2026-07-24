@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
-import { Box, Chip, IconButton, Paper, Typography } from '@mui/material'
+import { Box, Chip, CircularProgress, IconButton, Paper, Typography } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
 import SkipNextIcon from '@mui/icons-material/SkipNext'
@@ -21,12 +21,14 @@ export function WavePlayer({
   onToggleAutoplay,
   onEnded,
   onClose,
+  onStatus,
 }: {
   track: Track | null
   autoplay: boolean
   onToggleAutoplay: () => void
   onEnded: () => void
   onClose: () => void
+  onStatus?: (loading: boolean, playing: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WaveSurfer | null>(null)
@@ -37,6 +39,12 @@ export function WavePlayer({
   const [loading, setLoading] = useState(false)
   const [time, setTime] = useState(0)
   const [dur, setDur] = useState(0)
+
+  const statusRef = useRef(onStatus)
+  statusRef.current = onStatus
+  useEffect(() => {
+    statusRef.current?.(loading, playing)
+  }, [loading, playing])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -95,7 +103,7 @@ export function WavePlayer({
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <IconButton color="primary" disabled={loading} onClick={() => wsRef.current?.playPause()}>
-          {playing ? <PauseIcon /> : <PlayArrowIcon />}
+          {loading ? <CircularProgress size={22} /> : playing ? <PauseIcon /> : <PlayArrowIcon />}
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
@@ -113,7 +121,15 @@ export function WavePlayer({
               {track?.artists}
             </Typography>
           </Box>
-          <div ref={containerRef} style={{ cursor: 'pointer' }} />
+          <Box sx={{ position: 'relative' }}>
+            <div ref={containerRef} style={{ cursor: 'pointer' }} />
+            {loading && (
+              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={14} />
+                <Typography variant="caption" color="text.secondary">Loading preview…</Typography>
+              </Box>
+            )}
+          </Box>
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
           {clock(time)} / {clock(dur)}
