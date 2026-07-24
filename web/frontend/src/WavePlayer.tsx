@@ -80,6 +80,14 @@ export function WavePlayer({
     setLoading(true)
     setTime(0)
     setDur(0)
+    // Clear the previous track's waveform so it does not linger under the
+    // spinner while the new one decodes.
+    try {
+      ws.stop()
+      ws.empty()
+    } catch {
+      // ignore: nothing loaded yet
+    }
     ws.load(`/api/preview/${track.id}`).catch(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.id])
@@ -121,10 +129,18 @@ export function WavePlayer({
               {track?.artists}
             </Typography>
           </Box>
-          <Box sx={{ position: 'relative' }}>
+          <Box sx={{ position: 'relative', minHeight: 40 }}>
             <div ref={containerRef} style={{ cursor: 'pointer' }} />
             {loading && (
-              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
                 <CircularProgress size={14} />
                 <Typography variant="caption" color="text.secondary">Loading preview…</Typography>
               </Box>
