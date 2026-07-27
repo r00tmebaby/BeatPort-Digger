@@ -26,10 +26,10 @@ void main() {
   group('sortTracks', () {
     test('leaves order untouched when no column is chosen', () {
       final tracks = [track(name: 'b'), track(name: 'a')];
-      expect(
-        sortTracks(tracks, TrackSort.none, true).map((t) => t.name),
-        ['b', 'a'],
-      );
+      expect(sortTracks(tracks, TrackSort.none, true).map((t) => t.name), [
+        'b',
+        'a',
+      ]);
     });
 
     test('orders by bpm and reverses on descending', () {
@@ -45,10 +45,11 @@ void main() {
         track(name: 'nine', camelotNumber: 9, camelotLetter: 'A'),
         track(name: 'nineB', camelotNumber: 9, camelotLetter: 'B'),
       ];
-      expect(
-        sortTracks(tracks, TrackSort.key, true).map((t) => t.name),
-        ['nine', 'nineB', 'ten'],
-      );
+      expect(sortTracks(tracks, TrackSort.key, true).map((t) => t.name), [
+        'nine',
+        'nineB',
+        'ten',
+      ]);
     });
 
     test('orders lengths by duration, not lexically', () {
@@ -57,10 +58,10 @@ void main() {
         track(name: 'long', length: '10:00'),
         track(name: 'short', length: '9:00'),
       ];
-      expect(
-        sortTracks(tracks, TrackSort.length, true).map((t) => t.name),
-        ['short', 'long'],
-      );
+      expect(sortTracks(tracks, TrackSort.length, true).map((t) => t.name), [
+        'short',
+        'long',
+      ]);
     });
 
     test('handles hour-long durations', () {
@@ -68,17 +69,14 @@ void main() {
         track(name: 'hour', length: '1:00:00'),
         track(name: 'minutes', length: '59:00'),
       ];
-      expect(
-        sortTracks(tracks, TrackSort.length, true).map((t) => t.name),
-        ['minutes', 'hour'],
-      );
+      expect(sortTracks(tracks, TrackSort.length, true).map((t) => t.name), [
+        'minutes',
+        'hour',
+      ]);
     });
 
     test('keeps tracks with no value out of the way', () {
-      final tracks = [
-        track(name: 'none'),
-        track(name: 'has', bpm: 100),
-      ];
+      final tracks = [track(name: 'none'), track(name: 'has', bpm: 100)];
       // Missing sorts lowest ascending, so it does not displace real values at
       // the top of a descending sort either.
       expect(sortTracks(tracks, TrackSort.bpm, true).first.name, 'none');
@@ -90,10 +88,10 @@ void main() {
         track(name: 'b', artists: ['zebra']),
         track(name: 'a', artists: ['Apple']),
       ];
-      expect(
-        sortTracks(tracks, TrackSort.artists, true).map((t) => t.name),
-        ['a', 'b'],
-      );
+      expect(sortTracks(tracks, TrackSort.artists, true).map((t) => t.name), [
+        'a',
+        'b',
+      ]);
     });
 
     test('does not mutate the list it was given', () {

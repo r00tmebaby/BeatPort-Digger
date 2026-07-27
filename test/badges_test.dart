@@ -1,11 +1,8 @@
 import 'package:beatport_digger/engine/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Track fromJson(Map<String, dynamic> extra) => Track.fromJson({
-  'id': 1,
-  'name': 'Track',
-  ...extra,
-});
+Track fromJson(Map<String, dynamic> extra) =>
+    Track.fromJson({'id': 1, 'name': 'Track', ...extra});
 
 void main() {
   group('track flags', () {

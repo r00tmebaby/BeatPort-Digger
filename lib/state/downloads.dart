@@ -171,10 +171,12 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
 
     try {
-      await ffmpeg.install(onProgress: (progress) {
-        installProgress = progress;
-        _notify();
-      });
+      await ffmpeg.install(
+        onProgress: (progress) {
+          installProgress = progress;
+          _notify();
+        },
+      );
       _ffmpegReady = true;
       _ffmpegChecked = true;
       return true;
@@ -233,8 +235,9 @@ class DownloadQueue extends ChangeNotifier {
         ? await getApplicationDocumentsDirectory()
         : await getDownloadsDirectory() ??
               await getApplicationDocumentsDirectory();
-    return _destination =
-        Directory('${base.path}${Platform.pathSeparator}Beatport');
+    return _destination = Directory(
+      '${base.path}${Platform.pathSeparator}Beatport',
+    );
   }
 
   Future<void> setDestination(String? path) async {
@@ -247,7 +250,9 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<File> _settingsFile() async {
     final support = await getApplicationSupportDirectory();
-    return File('${support.path}${Platform.pathSeparator}download_settings.json');
+    return File(
+      '${support.path}${Platform.pathSeparator}download_settings.json',
+    );
   }
 
   /// Restores saved preferences. Failures are ignored: defaults are usable.
@@ -304,7 +309,9 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<File> _historyFile() async {
     final support = await getApplicationSupportDirectory();
-    return File('${support.path}${Platform.pathSeparator}download_history.json');
+    return File(
+      '${support.path}${Platform.pathSeparator}download_history.json',
+    );
   }
 
   /// Loads past downloads, then checks in the background whether their files
@@ -455,7 +462,10 @@ class DownloadQueue extends ChangeNotifier {
   /// Enumerating a broad filter takes many requests, so tracks are queued as
   /// they arrive rather than after the walk finishes: downloading starts
   /// immediately and a cancel does not throw away what was already found.
-  Future<int> enqueueStream(Stream<Track> source, {required String label}) async {
+  Future<int> enqueueStream(
+    Stream<Track> source, {
+    required String label,
+  }) async {
     if (discovering) return 0;
     final cancellation = Cancellation();
     _discovery = cancellation;

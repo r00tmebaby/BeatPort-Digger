@@ -13,7 +13,9 @@ Widget host(Widget child) => MaterialApp(
 );
 
 void main() {
-  testWidgets('header stays visible after the list is scrolled', (tester) async {
+  testWidgets('header stays visible after the list is scrolled', (
+    tester,
+  ) async {
     final tracks = [for (var i = 0; i < 100; i++) track(i, 'Track $i')];
     await tester.pumpWidget(host(TrackTable(tracks: tracks)));
     await tester.pumpAndSettle();

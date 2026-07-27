@@ -67,7 +67,9 @@ Map<String, String> templateValues(Track track) {
     'name': track.name ?? '',
     'mix': track.mixName ?? '',
     'genre': track.genreName,
-    'subgenre': track.subGenreName.isEmpty ? track.genreName : track.subGenreName,
+    'subgenre': track.subGenreName.isEmpty
+        ? track.genreName
+        : track.subGenreName,
     'key': key?.camelot ?? '',
     'key_name': key?.name ?? '',
     'bpm': track.bpm?.toString() ?? '',
@@ -116,14 +118,36 @@ final RegExp _whitespace = RegExp(r'\s+');
 
 /// Makes one path segment safe on every platform.
 String sanitizeSegment(String value) {
-  var cleaned = value.replaceAll(_illegal, '').replaceAll(_whitespace, ' ').trim();
+  var cleaned = value
+      .replaceAll(_illegal, '')
+      .replaceAll(_whitespace, ' ')
+      .trim();
   // Windows creates "name." and "name " but cannot open them afterwards.
   cleaned = cleaned.replaceAll(RegExp(r'[. ]+$'), '');
   // Reserved DOS device names are rejected regardless of extension.
   const reserved = {
-    'CON', 'PRN', 'AUX', 'NUL',
-    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
   };
   if (reserved.contains(cleaned.toUpperCase())) cleaned = '_$cleaned';
   if (cleaned.length > 120) cleaned = cleaned.substring(0, 120).trim();

@@ -1,8 +1,8 @@
 /// Live checks against the Beatport API.
 ///
-/// Skipped unless BEATPORT_USERNAME and BEATPORT_PASSWORD are set, so the
-/// normal test run stays offline. Run with:
-///   flutter test test/live_api_test.dart
+/// Tagged live and skipped by default so the normal test run stays offline.
+/// Needs credentials in BEATPORT_USERNAME and BEATPORT_PASSWORD. Run with:
+///   flutter test test/live_api_test.dart --run-skipped
 @Tags(['live'])
 library;
 
@@ -55,11 +55,15 @@ void main() {
     expect(token.isExpired(), isFalse);
   }, timeout: const Timeout(Duration(minutes: 2)));
 
-  test('caches the token and reloads it without credentials', () async {
-    final reloaded = await auth.loadCached();
-    expect(reloaded, isNotNull);
-    expect(reloaded!.accessToken, auth.token!.accessToken);
-  }, timeout: const Timeout(Duration(minutes: 2)));
+  test(
+    'caches the token and reloads it without credentials',
+    () async {
+      final reloaded = await auth.loadCached();
+      expect(reloaded, isNotNull);
+      expect(reloaded!.accessToken, auth.token!.accessToken);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
   test('rejects a cache belonging to another account', () async {
     final other = await auth.loadCached(
@@ -69,14 +73,18 @@ void main() {
     expect(other, isNull);
   });
 
-  test('refreshes the token, rotating it and keeping the login id', () async {
-    final before = auth.token!;
-    expect(await auth.refresh(), isTrue);
-    final after = auth.token!;
-    expect(after.accessToken, isNot(before.accessToken));
-    expect(after.loginId, before.loginId);
-    expect(after.isExpired(), isFalse);
-  }, timeout: const Timeout(Duration(minutes: 2)));
+  test(
+    'refreshes the token, rotating it and keeping the login id',
+    () async {
+      final before = auth.token!;
+      expect(await auth.refresh(), isTrue);
+      final after = auth.token!;
+      expect(after.accessToken, isNot(before.accessToken));
+      expect(after.loginId, before.loginId);
+      expect(after.isExpired(), isFalse);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
   test('fetches genres', () async {
     final genres = await catalog.genres();
@@ -84,75 +92,95 @@ void main() {
     expect(genres.any((g) => g.name == 'Amapiano'), isTrue);
   }, timeout: const Timeout(Duration(minutes: 2)));
 
-  test('publish_date is ignored by the API, new_release_date is not', () async {
-    // The API silently disregards a publish_date range: it is accepted and then
-    // ignored, returning the unfiltered catalog.
-    final filtered = TrackQuery(
-      genreId: [89],
-      orderBy: 'publish_date',
-      perPage: 20,
-    ).dated(DateTime(2019, 5, 1), DateTime(2019, 5, 7));
+  test(
+    'publish_date is ignored by the API, new_release_date is not',
+    () async {
+      // The API silently disregards a publish_date range: it is accepted and then
+      // ignored, returning the unfiltered catalog.
+      final filtered = TrackQuery(
+        genreId: [89],
+        orderBy: 'publish_date',
+        perPage: 20,
+      ).dated(DateTime(2019, 5, 1), DateTime(2019, 5, 7));
 
-    final page = await catalog.tracks(filtered);
-    expect(page.count, lessThan(2000));
-    for (final track in page.results) {
-      expect(track.newReleaseDate, isNotNull);
-      expect(
-        track.newReleaseDate!.compareTo('2019-05-01') >= 0 &&
-            track.newReleaseDate!.compareTo('2019-05-07') <= 0,
-        isTrue,
-        reason: 'row outside the requested window: ${track.newReleaseDate}',
+      final page = await catalog.tracks(filtered);
+      expect(page.count, lessThan(2000));
+      for (final track in page.results) {
+        expect(track.newReleaseDate, isNotNull);
+        expect(
+          track.newReleaseDate!.compareTo('2019-05-01') >= 0 &&
+              track.newReleaseDate!.compareTo('2019-05-07') <= 0,
+          isTrue,
+          reason: 'row outside the requested window: ${track.newReleaseDate}',
+        );
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'rejects an offset past the result window',
+    () async {
+      final query = TrackQuery(
+        genreId: [89],
+        orderBy: 'publish_date',
+        perPage: 100,
       );
-    }
-  }, timeout: const Timeout(Duration(minutes: 2)));
+      await expectLater(
+        catalog.tracks(query, page: 101),
+        throwsA(isA<Exception>()),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
-  test('rejects an offset past the result window', () async {
-    final query = TrackQuery(genreId: [89], orderBy: 'publish_date', perPage: 100);
-    await expectLater(
-      catalog.tracks(query, page: 101),
-      throwsA(isA<Exception>()),
-    );
-  }, timeout: const Timeout(Duration(minutes: 2)));
+  test(
+    'exports a full year as a stable, deduplicated track count',
+    () async {
+      // Amapiano 2023 resolves to 4,427 distinct tracks across two split
+      // strategies; the count must stay stable.
+      final query = TrackQuery(
+        genreId: [98],
+        orderBy: 'publish_date',
+        perPage: 2000,
+      );
+      final windows = <ExportWindow>[];
+      final ids = <int>{};
 
-  test('exports a full year as a stable, deduplicated track count', () async {
-    // Amapiano 2023 resolves to 4,427 distinct tracks across two split
-    // strategies; the count must stay stable.
-    final query = TrackQuery(
-      genreId: [98],
-      orderBy: 'publish_date',
-      perPage: 2000,
-    );
-    final windows = <ExportWindow>[];
-    final ids = <int>{};
+      await for (final track in catalog.exportTracks(
+        query,
+        DateTime(2023, 1, 1),
+        DateTime(2023, 12, 31),
+        onWindow: windows.add,
+      )) {
+        if (track.id != null) ids.add(track.id!);
+      }
 
-    await for (final track in catalog.exportTracks(
-      query,
-      DateTime(2023, 1, 1),
-      DateTime(2023, 12, 31),
-      onWindow: windows.add,
-    )) {
-      if (track.id != null) ids.add(track.id!);
-    }
+      expect(ids.length, 4427);
+      expect(windows, isNotEmpty);
+      expect(windows.every((w) => !w.truncated), isTrue);
+    },
+    timeout: const Timeout(Duration(minutes: 15)),
+  );
 
-    expect(ids.length, 4427);
-    expect(windows, isNotEmpty);
-    expect(windows.every((w) => !w.truncated), isTrue);
-  }, timeout: const Timeout(Duration(minutes: 15)));
-
-  test('a different split strategy yields the same set', () async {
-    final query = TrackQuery(
-      genreId: [98],
-      orderBy: 'publish_date',
-      perPage: 200,
-    );
-    final ids = <int>{};
-    await for (final track in catalog.exportTracks(
-      query,
-      DateTime(2023, 1, 1),
-      DateTime(2023, 12, 31),
-    )) {
-      if (track.id != null) ids.add(track.id!);
-    }
-    expect(ids.length, 4427);
-  }, timeout: const Timeout(Duration(minutes: 20)));
+  test(
+    'a different split strategy yields the same set',
+    () async {
+      final query = TrackQuery(
+        genreId: [98],
+        orderBy: 'publish_date',
+        perPage: 200,
+      );
+      final ids = <int>{};
+      await for (final track in catalog.exportTracks(
+        query,
+        DateTime(2023, 1, 1),
+        DateTime(2023, 12, 31),
+      )) {
+        if (track.id != null) ids.add(track.id!);
+      }
+      expect(ids.length, 4427);
+    },
+    timeout: const Timeout(Duration(minutes: 20)),
+  );
 }

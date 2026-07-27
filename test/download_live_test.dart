@@ -1,8 +1,8 @@
 /// End-to-end download checks against the live API.
 ///
-/// Needs a credentials file; set BPCAT_CREDENTIALS to point at one, otherwise
-/// the suite is skipped. Downloads a real track, so it is tagged live and
-/// excluded from the default run.
+/// Needs a credentials file; set BPCAT_CREDENTIALS to point at one. Downloads
+/// a real track, so it is tagged live and skipped by default; run with:
+///   flutter test test/download_live_test.dart --run-skipped
 @Tags(['live'])
 library;
 
@@ -75,9 +75,7 @@ void main() {
     final grouped = await catalog.keyIdsByCamelot();
     final ids = [...?grouped['8A'], ...?grouped['8B']];
 
-    final page = await catalog.tracks(
-      TrackQuery(keyId: ids, perPage: 20),
-    );
+    final page = await catalog.tracks(TrackQuery(keyId: ids, perPage: 20));
     expect(page.results, isNotEmpty);
 
     // The bug this guards: a comma-joined key_name returns zero results, and a
@@ -123,83 +121,108 @@ void main() {
     expect(tracks, isNotEmpty);
   });
 
-  test('parallel segment fetch yields the same bytes as sequential', () async {
-    if (!available) return markTestSkipped('no credentials');
-    final page = await catalog.tracks(TrackQuery(perPage: 1));
-    final track = page.results.single;
+  test(
+    'parallel segment fetch yields the same bytes as sequential',
+    () async {
+      if (!available) return markTestSkipped('no credentials');
+      final page = await catalog.tracks(TrackQuery(perPage: 1));
+      final track = page.results.single;
 
-    // Segments are written in completion order if Future.wait's ordering is
-    // ever assumed wrongly, which would corrupt the audio while leaving the
-    // file a plausible size. Comparing the two byte for byte catches that.
-    final sequentialDir = await temp.createTemp('seq');
-    final parallelDir = await temp.createTemp('par');
+      // Segments are written in completion order if Future.wait's ordering is
+      // ever assumed wrongly, which would corrupt the audio while leaving the
+      // file a plausible size. Comparing the two byte for byte catches that.
+      final sequentialDir = await temp.createTemp('seq');
+      final parallelDir = await temp.createTemp('par');
 
-    final sequential = await Downloader(
-      catalog: catalog,
-      httpClient: client,
-      segmentConcurrency: 1,
-    ).downloadTrack(track, sequentialDir, quality: AudioQuality.hls);
+      final sequential = await Downloader(
+        catalog: catalog,
+        httpClient: client,
+        segmentConcurrency: 1,
+      ).downloadTrack(track, sequentialDir, quality: AudioQuality.hls);
 
-    final parallel = await Downloader(
-      catalog: catalog,
-      httpClient: client,
-      segmentConcurrency: 8,
-    ).downloadTrack(track, parallelDir, quality: AudioQuality.hls);
+      final parallel = await Downloader(
+        catalog: catalog,
+        httpClient: client,
+        segmentConcurrency: 8,
+      ).downloadTrack(track, parallelDir, quality: AudioQuality.hls);
 
-    final a = await File(sequential.path).readAsBytes();
-    final b = await File(parallel.path).readAsBytes();
-    expect(b.length, a.length, reason: 'same stream, same byte count');
-    expect(b, orderedEquals(a));
-  }, timeout: const Timeout(Duration(minutes: 5)));
+      final a = await File(sequential.path).readAsBytes();
+      final b = await File(parallel.path).readAsBytes();
+      expect(b.length, a.length, reason: 'same stream, same byte count');
+      expect(b, orderedEquals(a));
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
 
-  test('previews the whole track, not a clip', () async {
-    if (!available) return markTestSkipped('no credentials');
-    final page = await catalog.tracks(TrackQuery(perPage: 1));
-    final track = page.results.single;
+  test(
+    'previews the whole track, not a clip',
+    () async {
+      if (!available) return markTestSkipped('no credentials');
+      final page = await catalog.tracks(TrackQuery(perPage: 1));
+      final track = page.results.single;
 
-    final downloader = Downloader(catalog: catalog, httpClient: client);
-    final whole = await temp.createTemp('whole');
-    final clip = await temp.createTemp('clip');
+      final downloader = Downloader(catalog: catalog, httpClient: client);
+      final whole = await temp.createTemp('whole');
+      final clip = await temp.createTemp('clip');
 
-    var total = 0;
-    final full = await downloader.downloadPreview(
-      track.id!,
-      whole,
-      onProgress: (p) => total = p.total,
-    );
-    final short = await downloader.downloadPreview(track.id!, clip, segments: 3);
+      var total = 0;
+      final full = await downloader.downloadPreview(
+        track.id!,
+        whole,
+        onProgress: (p) => total = p.total,
+      );
+      final short = await downloader.downloadPreview(
+        track.id!,
+        clip,
+        segments: 3,
+      );
 
-    // Default must cover the whole playlist, not a fixed handful of segments.
-    expect(total, greaterThan(10), reason: 'a full track is dozens of segments');
-    expect(
-      await full.length(),
-      greaterThan(await short.length() * 3),
-      reason: 'the full preview is much longer than a three segment clip',
-    );
-  }, timeout: const Timeout(Duration(minutes: 5)));
+      // Default must cover the whole playlist, not a fixed handful of segments.
+      expect(
+        total,
+        greaterThan(10),
+        reason: 'a full track is dozens of segments',
+      );
+      expect(
+        await full.length(),
+        greaterThan(await short.length() * 3),
+        reason: 'the full preview is much longer than a three segment clip',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
 
-  test('builds a preview file the player can decode', () async {
-    if (!available) return markTestSkipped('no credentials');
-    final page = await catalog.tracks(TrackQuery(perPage: 1));
-    final track = page.results.single;
+  test(
+    'builds a preview file the player can decode',
+    () async {
+      if (!available) return markTestSkipped('no credentials');
+      final page = await catalog.tracks(TrackQuery(perPage: 1));
+      final track = page.results.single;
 
-    final downloader = Downloader(catalog: catalog, httpClient: client);
-    final file = await downloader.downloadPreview(track.id!, temp, segments: 3);
+      final downloader = Downloader(catalog: catalog, httpClient: client);
+      final file = await downloader.downloadPreview(
+        track.id!,
+        temp,
+        segments: 3,
+      );
 
-    expect(await file.exists(), isTrue);
-    expect(file.path, endsWith('.aac'));
-    expect(await file.length(), greaterThan(20000));
+      expect(await file.exists(), isTrue);
+      expect(file.path, endsWith('.aac'));
+      expect(await file.length(), greaterThan(20000));
 
-    // The audio-only libmpv build cannot demux encrypted HLS, which is why the
-    // preview is decrypted here first. Confirm the result really is plain ADTS
-    // behind its ID3 tag, since that is what the player is handed.
-    final head = await file.openRead(0, 64).first;
-    expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
-    final tagSize = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
-    final frame = await file.openRead(10 + tagSize, 12 + tagSize).first;
-    expect(frame[0], 0xFF);
-    expect(frame[1] & 0xF0, 0xF0);
-  }, timeout: const Timeout(Duration(minutes: 3)));
+      // The audio-only libmpv build cannot demux encrypted HLS, which is why the
+      // preview is decrypted here first. Confirm the result really is plain ADTS
+      // behind its ID3 tag, since that is what the player is handed.
+      final head = await file.openRead(0, 64).first;
+      expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
+      final tagSize =
+          (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
+      final frame = await file.openRead(10 + tagSize, 12 + tagSize).first;
+      expect(frame[0], 0xFF);
+      expect(frame[1] & 0xF0, 0xF0);
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
 
   test('downloads a track as FLAC', () async {
     if (!available) return markTestSkipped('no credentials');
@@ -225,40 +248,49 @@ void main() {
     expect(String.fromCharCodes(header), 'fLaC');
   }, timeout: const Timeout(Duration(minutes: 5)));
 
-  test('downloads a track over HLS and decrypts it', () async {
-    if (!available) return markTestSkipped('no credentials');
-    final page = await catalog.tracks(TrackQuery(perPage: 1));
-    final track = page.results.single;
+  test(
+    'downloads a track over HLS and decrypts it',
+    () async {
+      if (!available) return markTestSkipped('no credentials');
+      final page = await catalog.tracks(TrackQuery(perPage: 1));
+      final track = page.results.single;
 
-    final downloader = Downloader(catalog: catalog, httpClient: client);
-    var segments = 0;
-    final result = await downloader.downloadTrack(
-      track,
-      temp,
-      quality: AudioQuality.hls,
-      onProgress: (p) => segments = p.total,
-    );
+      final downloader = Downloader(catalog: catalog, httpClient: client);
+      var segments = 0;
+      final result = await downloader.downloadTrack(
+        track,
+        temp,
+        quality: AudioQuality.hls,
+        onProgress: (p) => segments = p.total,
+      );
 
-    final file = File(result.path);
-    expect(await file.exists(), isTrue);
-    expect(segments, greaterThan(1), reason: 'the playlist has many segments');
+      final file = File(result.path);
+      expect(await file.exists(), isTrue);
+      expect(
+        segments,
+        greaterThan(1),
+        reason: 'the playlist has many segments',
+      );
 
-    final bytes = await file.length();
-    expect(bytes, greaterThan(100000));
+      final bytes = await file.length();
+      expect(bytes, greaterThan(100000));
 
-    // Decryption is the part that fails silently: wrong key material yields a
-    // file of plausible size that is not audio. Segments open with an ID3v2
-    // tag, and the AAC itself begins right after it, so checking both proves
-    // the plaintext is really audio rather than noise that happens to be long
-    // enough.
-    final head = await file.openRead(0, 64).first;
-    expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
+      // Decryption is the part that fails silently: wrong key material yields a
+      // file of plausible size that is not audio. Segments open with an ID3v2
+      // tag, and the AAC itself begins right after it, so checking both proves
+      // the plaintext is really audio rather than noise that happens to be long
+      // enough.
+      final head = await file.openRead(0, 64).first;
+      expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
 
-    // ID3v2 size is synchsafe: seven bits per byte.
-    final tagSize = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
-    final audioStart = 10 + tagSize;
-    final frame = await file.openRead(audioStart, audioStart + 2).first;
-    expect(frame[0], 0xFF, reason: 'ADTS sync word after the ID3 tag');
-    expect(frame[1] & 0xF0, 0xF0);
-  }, timeout: const Timeout(Duration(minutes: 5)));
+      // ID3v2 size is synchsafe: seven bits per byte.
+      final tagSize =
+          (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
+      final audioStart = 10 + tagSize;
+      final frame = await file.openRead(audioStart, audioStart + 2).first;
+      expect(frame[0], 0xFF, reason: 'ADTS sync word after the ID3 tag');
+      expect(frame[1] & 0xF0, 0xF0);
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
 }

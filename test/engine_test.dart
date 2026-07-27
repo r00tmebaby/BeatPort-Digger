@@ -60,17 +60,19 @@ void main() {
     test('filters on new_release_date, never publish_date', () {
       // The API accepts a publish_date range and then ignores it, silently
       // returning the unfiltered catalog.
-      final query = TrackQuery(genreId: [89]).dated(
-        DateTime(2026, 1, 1),
-        DateTime(2026, 6, 30),
-      );
+      final query = TrackQuery(
+        genreId: [89],
+      ).dated(DateTime(2026, 1, 1), DateTime(2026, 6, 30));
       final params = query.params();
       expect(params['new_release_date'], '2026-01-01:2026-06-30');
       expect(params.containsKey('publish_date'), isFalse);
     });
 
     test('pads single-digit months and days', () {
-      final query = TrackQuery().dated(DateTime(2026, 3, 5), DateTime(2026, 3, 5));
+      final query = TrackQuery().dated(
+        DateTime(2026, 3, 5),
+        DateTime(2026, 3, 5),
+      );
       expect(query.params()['new_release_date'], '2026-03-05:2026-03-05');
     });
 

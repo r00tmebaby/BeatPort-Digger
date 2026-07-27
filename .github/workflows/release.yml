@@ -1,0 +1,279 @@
+name: Release
+
+# Builds every platform we ship and attaches the artifacts to the GitHub
+# release for the pushed tag. A workflow_dispatch run builds the same
+# artifacts (named after the branch) without publishing a release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Stage artifact
+        run: |
+          mkdir staging
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "staging/BeatPort-Digger-${{ github.ref_name }}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: staging/*
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Windows app
+        run: flutter build windows --release
+
+      - name: Stage artifact
+        run: |
+          New-Item -ItemType Directory staging | Out-Null
+          Compress-Archive -Path build\windows\x64\runner\Release\* `
+            -DestinationPath "staging\BeatPort-Digger-${{ github.ref_name }}-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: staging/*
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libmpv-dev mpv
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Linux app
+        run: flutter build linux --release
+
+      - name: Stage artifact
+        run: |
+          mkdir staging
+          tar -C build/linux/x64/release/bundle \
+            -czf "staging/BeatPort-Digger-${{ github.ref_name }}-linux-x64.tar.gz" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: staging/*
+
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build macOS app
+        run: flutter build macos --release
+
+      # The bundle is unsigned; first launch needs the quarantine flag cleared:
+      #   xattr -cr "BeatPort Digger.app"
+      - name: Stage artifact
+        run: |
+          mkdir staging
+          ditto -c -k --keepParent \
+            "build/macos/Build/Products/Release/BeatPort Digger.app" \
+            "staging/BeatPort-Digger-${{ github.ref_name }}-macos-universal.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: staging/*
+
+  ios:
+    name: iOS IPA (unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # No signing identity in CI; the IPA must be signed on install with
+      # AltStore, Sideloadly or Xcode. See BUILD-iOS.md for signed builds.
+      - name: Build iOS app without signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir staging Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr "staging/BeatPort-Digger-${{ github.ref_name }}-ios-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-ios
+          path: staging/*
+
+  web-frontend:
+    name: Web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build the React frontend
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/frontend/dist
+
+  # Self-contained web bundle: the compiled backend next to the built UI, laid
+  # out so the server finds web/frontend/dist relative to its working
+  # directory. bin/server.dart only pulls pure-Dart engine code, so it
+  # compiles to a native executable.
+  web-server:
+    name: Web server (${{ matrix.label }})
+    needs: web-frontend
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+            binary: beatport-digger-server
+          - os: windows-latest
+            label: windows-x64
+            binary: beatport-digger-server.exe
+          - os: macos-latest
+            label: macos-arm64
+            binary: beatport-digger-server
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: bundle/web/frontend/dist
+
+      - name: Compile the server
+        shell: bash
+        run: |
+          flutter pub get
+          dart compile exe bin/server.dart -o "bundle/${{ matrix.binary }}"
+
+      - name: Add run notes
+        shell: bash
+        run: |
+          cat > bundle/README.txt << 'EOF'
+          BeatPort Digger - web version
+
+          Run the beatport-digger-server executable from this folder. It serves
+          the UI and the API on port 8080 and prints the machine's LAN
+          addresses at startup; open one of them in a browser on any device on
+          the same network and sign in with your Beatport account.
+
+          Keep it on your local network: the server holds a single signed-in
+          Beatport session and has no multi-user auth.
+          EOF
+
+      - name: Zip bundle
+        shell: bash
+        run: |
+          mkdir staging
+          cd bundle
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../staging/BeatPort-Digger-${{ github.ref_name }}-web-${{ matrix.label }}.zip" . > /dev/null
+          else
+            zip -qr "../staging/BeatPort-Digger-${{ github.ref_name }}-web-${{ matrix.label }}.zip" .
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web-${{ matrix.label }}
+          path: staging/*
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [android, windows, linux, macos, ios, web-server]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ### Installing
+
+            | Platform | Artifact | Notes |
+            | --- | --- | --- |
+            | Windows | `*-windows-x64.zip` | Unzip and run `BeatPortDigger.exe`. |
+            | Linux | `*-linux-x64.tar.gz` | Untar and run `beatport_digger`. |
+            | macOS | `*-macos-universal.zip` | Unzip, then clear quarantine once: `xattr -cr "BeatPort Digger.app"` (the bundle is unsigned). |
+            | Android | `*-android.apk` | Allow installs from unknown sources, then open the APK. |
+            | iOS | `*-ios-unsigned.ipa` | Unsigned; sideload with AltStore/Sideloadly, or build signed per `BUILD-iOS.md`. |
+            | Web | `*-web-<os>.zip` | Unzip and run the bundled server; open the printed address from any browser on your network. |

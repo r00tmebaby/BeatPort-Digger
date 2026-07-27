@@ -29,8 +29,9 @@ void main() {
     // Writes history JSON. jsonEncode escapes Windows backslash paths that a
     // hand-written string would corrupt.
     void writeHistory(List<Map<String, dynamic>> entries) {
-      File('${support.path}${Platform.pathSeparator}download_history.json')
-          .writeAsStringSync(jsonEncode(entries));
+      File(
+        '${support.path}${Platform.pathSeparator}download_history.json',
+      ).writeAsStringSync(jsonEncode(entries));
     }
 
     Map<String, dynamic> record(int id, String fileName) => {
@@ -45,8 +46,9 @@ void main() {
     test('persists a completion and reloads it', () async {
       // A record written by one queue must be visible to the next launch.
       writeHistory([record(42, 'strobe.flac')]);
-      File('${support.path}${Platform.pathSeparator}strobe.flac')
-          .writeAsStringSync('audio');
+      File(
+        '${support.path}${Platform.pathSeparator}strobe.flac',
+      ).writeAsStringSync('audio');
 
       final queue = DownloadQueue();
       await queue.loadHistory();

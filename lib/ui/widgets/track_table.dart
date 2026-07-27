@@ -19,7 +19,11 @@ enum PlaybackState { idle, loading, playing, paused }
 ///
 /// Tints are kept low-opacity so a long list still reads as a table rather than
 /// a block of colour, and each hue is distinct in both light and dark themes.
-Color? statusColor(JobStatus? status, ColorScheme scheme, Brightness brightness) {
+Color? statusColor(
+  JobStatus? status,
+  ColorScheme scheme,
+  Brightness brightness,
+) {
   if (status == null) return null;
   final alpha = brightness == Brightness.dark ? 0.22 : 0.16;
   final base = switch (status) {
@@ -72,12 +76,14 @@ class TrackBadges extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: (_colours[badge] ?? Colors.grey)
-                    .withValues(alpha: dark ? 0.30 : 0.20),
+                color: (_colours[badge] ?? Colors.grey).withValues(
+                  alpha: dark ? 0.30 : 0.20,
+                ),
                 borderRadius: BorderRadius.circular(3),
                 border: Border.all(
-                  color: (_colours[badge] ?? Colors.grey)
-                      .withValues(alpha: 0.55),
+                  color: (_colours[badge] ?? Colors.grey).withValues(
+                    alpha: 0.55,
+                  ),
                 ),
               ),
               child: Text(
@@ -176,16 +182,18 @@ List<Track> sortTracks(List<Track> tracks, TrackSort sort, bool ascending) {
     TrackSort.label => a.labelName.toLowerCase().compareTo(
       b.labelName.toLowerCase(),
     ),
-    TrackSort.genre => (a.subGenreName.isEmpty ? a.genreName : a.subGenreName)
-        .toLowerCase()
-        .compareTo(
-          (b.subGenreName.isEmpty ? b.genreName : b.subGenreName).toLowerCase(),
-        ),
+    TrackSort.genre =>
+      (a.subGenreName.isEmpty ? a.genreName : a.subGenreName)
+          .toLowerCase()
+          .compareTo(
+            (b.subGenreName.isEmpty ? b.genreName : b.subGenreName)
+                .toLowerCase(),
+          ),
     TrackSort.bpm => (a.bpm ?? -1).compareTo(b.bpm ?? -1),
     TrackSort.key => _keyRank(a).compareTo(_keyRank(b)),
-    TrackSort.length => _lengthSeconds(a.length).compareTo(
-      _lengthSeconds(b.length),
-    ),
+    TrackSort.length => _lengthSeconds(
+      a.length,
+    ).compareTo(_lengthSeconds(b.length)),
     TrackSort.none => 0,
   };
 
@@ -294,14 +302,8 @@ class _TrackTableState extends State<TrackTable> {
     final wide = MediaQuery.sizeOf(context).width >= 760;
 
     return wide
-        ? _WideTable(
-            tracks: ordered,
-            state: this,
-          )
-        : _NarrowList(
-            tracks: ordered,
-            state: this,
-          );
+        ? _WideTable(tracks: ordered, state: this)
+        : _NarrowList(tracks: ordered, state: this);
   }
 }
 
@@ -371,8 +373,9 @@ class _DownloadButton extends StatelessWidget {
       case JobStatus.cancelled:
         return IconButton(
           onPressed: () => onDownload!(track),
-          tooltip:
-              status == JobStatus.failed ? 'Failed - retry' : 'Cancelled - retry',
+          tooltip: status == JobStatus.failed
+              ? 'Failed - retry'
+              : 'Cancelled - retry',
           icon: Icon(Icons.refresh, size: 20, color: scheme.error),
         );
       case null:
@@ -407,8 +410,9 @@ class _SortableHeader extends StatelessWidget {
     return InkWell(
       onTap: () => state._toggleSort(column),
       child: Row(
-        mainAxisAlignment:
-            center ? MainAxisAlignment.center : MainAxisAlignment.start,
+        mainAxisAlignment: center
+            ? MainAxisAlignment.center
+            : MainAxisAlignment.start,
         children: [
           Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
           if (active)
@@ -543,15 +547,16 @@ class _WideTable extends StatelessWidget {
       itemBuilder: (context, index) {
         final track = tracks[index];
         final id = track.id;
-        final checked = selectable && id != null && widget.selected!.contains(id);
+        final checked =
+            selectable && id != null && widget.selected!.contains(id);
         final status = widget.statusFor?.call(track);
         // Selection wins over the status tint: it is the state the user is
         // actively manipulating and must stay legible.
         final tint = checked
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
             : widget.colourByStatus
-                ? statusColor(status, theme.colorScheme, theme.brightness)
-                : null;
+            ? statusColor(status, theme.colorScheme, theme.brightness)
+            : null;
 
         return InkWell(
           onTap: widget.onTap == null ? null : () => widget.onTap!(track),
@@ -560,8 +565,9 @@ class _WideTable extends StatelessWidget {
             decoration: BoxDecoration(
               color: tint,
               border: Border(
-                bottom:
-                    BorderSide(color: theme.dividerColor.withValues(alpha: 0.4)),
+                bottom: BorderSide(
+                  color: theme.dividerColor.withValues(alpha: 0.4),
+                ),
               ),
             ),
             child: DefaultTextStyle(
@@ -602,7 +608,10 @@ class _WideTable extends StatelessWidget {
                         },
                       ),
                     ),
-                  Expanded(flex: 3, child: Text(track.artistNames, maxLines: 2)),
+                  Expanded(
+                    flex: 3,
+                    child: Text(track.artistNames, maxLines: 2),
+                  ),
                   Expanded(
                     flex: 4,
                     child: Column(
@@ -633,8 +642,10 @@ class _WideTable extends StatelessWidget {
                   ),
                   SizedBox(
                     width: 52,
-                    child: Text('${track.bpm ?? ''}',
-                        textAlign: TextAlign.center),
+                    child: Text(
+                      '${track.bpm ?? ''}',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                   SizedBox(
                     width: 60,
@@ -643,7 +654,10 @@ class _WideTable extends StatelessWidget {
                   const SizedBox(width: 8),
                   SizedBox(
                     width: 56,
-                    child: Text(track.length ?? '', textAlign: TextAlign.center),
+                    child: Text(
+                      track.length ?? '',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                   SizedBox(
                     width: 48,
@@ -652,7 +666,8 @@ class _WideTable extends StatelessWidget {
                       onDownload: widget.onDownload,
                       statusFor: widget.statusFor,
                       historyMark:
-                          widget.historyMarkFor?.call(track) ?? HistoryMark.none,
+                          widget.historyMarkFor?.call(track) ??
+                          HistoryMark.none,
                     ),
                   ),
                 ],
@@ -665,7 +680,10 @@ class _WideTable extends StatelessWidget {
 
     // Header pinned, rows scroll beneath it.
     return Column(
-      children: [header, Expanded(child: list)],
+      children: [
+        header,
+        Expanded(child: list),
+      ],
     );
   }
 }
@@ -688,13 +706,14 @@ class _NarrowList extends StatelessWidget {
       itemBuilder: (context, index) {
         final track = tracks[index];
         final id = track.id;
-        final checked = selectable && id != null && widget.selected!.contains(id);
+        final checked =
+            selectable && id != null && widget.selected!.contains(id);
         final status = widget.statusFor?.call(track);
         final tint = checked
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
             : widget.colourByStatus
-                ? statusColor(status, theme.colorScheme, theme.brightness)
-                : null;
+            ? statusColor(status, theme.colorScheme, theme.brightness)
+            : null;
 
         return ListTile(
           tileColor: tint,

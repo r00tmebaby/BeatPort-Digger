@@ -48,7 +48,8 @@ class FfmpegRelease {
 const Map<String, FfmpegRelease> ffmpegReleases = {
   'windows': FfmpegRelease(
     version: '8.1.2',
-    url: 'https://www.gyan.dev/ffmpeg/builds/packages/'
+    url:
+        'https://www.gyan.dev/ffmpeg/builds/packages/'
         'ffmpeg-8.1.2-essentials_build.zip',
     sha256: 'db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec',
     archiveEntry: 'ffmpeg-8.1.2-essentials_build/bin/ffmpeg.exe',
@@ -97,8 +98,8 @@ class Ffmpeg {
   /// Where an app-managed copy lives.
   Future<File> managedBinary() async {
     final release = ffmpegReleases[Platform.operatingSystem];
-    final name = release?.executable ??
-        (Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg');
+    final name =
+        release?.executable ?? (Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg');
     final support = await getApplicationSupportDirectory();
     final separator = Platform.pathSeparator;
     return File('${support.path}${separator}ffmpeg$separator$name');
@@ -133,9 +134,7 @@ class Ffmpeg {
   /// The archive is streamed to disk rather than buffered: the Windows build is
   /// over 100 MB and holding it in memory alongside its extracted contents is
   /// avoidable.
-  Future<String> install({
-    void Function(InstallProgress)? onProgress,
-  }) async {
+  Future<String> install({void Function(InstallProgress)? onProgress}) async {
     final release = ffmpegReleases[Platform.operatingSystem];
     if (release == null) {
       throw FfmpegException(
@@ -147,8 +146,10 @@ class Ffmpeg {
 
     final target = await managedBinary();
     await target.parent.create(recursive: true);
-    final archive = File('${target.parent.path}${Platform.pathSeparator}'
-        'ffmpeg-${release.version}.zip.part');
+    final archive = File(
+      '${target.parent.path}${Platform.pathSeparator}'
+      'ffmpeg-${release.version}.zip.part',
+    );
 
     try {
       await _download(release, archive, onProgress);

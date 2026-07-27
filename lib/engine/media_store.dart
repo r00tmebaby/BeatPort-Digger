@@ -10,7 +10,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 class MediaStore {
-  static const MethodChannel _channel = MethodChannel('beatport_digger/mediastore');
+  static const MethodChannel _channel = MethodChannel(
+    'beatport_digger/mediastore',
+  );
 
   /// Copies the file at [sourcePath] into the shared audio collection under
   /// [relativeDir] and returns its on-disk path, or null when publishing is

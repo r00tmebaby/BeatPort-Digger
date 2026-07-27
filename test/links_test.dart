@@ -78,8 +78,11 @@ void main() {
         'https://www.beatport.com/track',
         'https://www.beatport.com/tracks',
       ]) {
-        expect(() => parseBeatportLink(url), throwsA(isA<LinkException>()),
-            reason: url);
+        expect(
+          () => parseBeatportLink(url),
+          throwsA(isA<LinkException>()),
+          reason: url,
+        );
       }
     });
 

@@ -51,8 +51,10 @@ void main() {
     test('substitutes known fields', () {
       final values = templateValues(make(mix: 'Extended Mix'));
       expect(renderTemplate('{genre}/{key}', values), 'Techno/8A');
-      expect(renderTemplate('{artists} - {title}', values),
-          'Artist - Track (Extended Mix)');
+      expect(
+        renderTemplate('{artists} - {title}', values),
+        'Artist - Track (Extended Mix)',
+      );
     });
 
     test('falls back to a visible folder when a value is missing', () {
@@ -82,10 +84,7 @@ void main() {
 
   group('folderSegments', () {
     test('nests on slashes', () {
-      expect(
-        folderSegments('{genre}/{bpm10}', make()),
-        ['Techno', '120-129'],
-      );
+      expect(folderSegments('{genre}/{bpm10}', make()), ['Techno', '120-129']);
     });
 
     test('an empty template means no nesting', () {
@@ -96,16 +95,14 @@ void main() {
     test('a value containing a slash cannot invent nesting', () {
       // "Drum & Bass / Jungle" as a genre must stay one folder, and a value
       // like "../.." must not climb out of the download directory.
-      expect(
-        folderSegments('{genre}', make(genre: 'Drum & Bass / Jungle')),
-        ['Drum & Bass Jungle'],
-      );
+      expect(folderSegments('{genre}', make(genre: 'Drum & Bass / Jungle')), [
+        'Drum & Bass Jungle',
+      ]);
       // Separators inside a value are stripped, so the traversal collapses to
       // one harmless folder instead of climbing out.
-      expect(
-        folderSegments('{label}', make(label: r'..\..\Windows')),
-        ['....Windows'],
-      );
+      expect(folderSegments('{label}', make(label: r'..\..\Windows')), [
+        '....Windows',
+      ]);
     });
 
     test('a template segment that is only dots is dropped', () {

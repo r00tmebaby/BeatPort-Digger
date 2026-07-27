@@ -110,7 +110,9 @@ class Authenticator {
       'code': code,
       'client_id': _clientId,
     });
-    return _persist(issued.stamped(loginId: computeLoginId(username, password)));
+    return _persist(
+      issued.stamped(loginId: computeLoginId(username, password)),
+    );
   }
 
   Future<void> logOut() async {
@@ -157,7 +159,10 @@ class Authenticator {
 
     final sessionId = sessionIdFrom(response.headers);
     if (sessionId == null) {
-      throw AuthException(response.statusCode, 'login returned no sessionid cookie');
+      throw AuthException(
+        response.statusCode,
+        'login returned no sessionid cookie',
+      );
     }
     return sessionId;
   }

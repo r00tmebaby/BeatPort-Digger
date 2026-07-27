@@ -24,7 +24,9 @@ Uint8List encrypt(Uint8List plain, Uint8List key, Uint8List iv) {
 }
 
 void main() {
-  final base = Uri.parse('https://stream.beatport.com/audio/1234/playlist.m3u8');
+  final base = Uri.parse(
+    'https://stream.beatport.com/audio/1234/playlist.m3u8',
+  );
 
   group('parseMediaPlaylist', () {
     test('reads segments and the key in playback order', () {
@@ -44,8 +46,10 @@ segment1.ts
         Uri.parse('https://stream.beatport.com/audio/1234/segment0.ts'),
         Uri.parse('https://stream.beatport.com/audio/1234/segment1.ts'),
       ]);
-      expect(playlist.keyUri,
-          Uri.parse('https://stream.beatport.com/audio/1234/key.bin'));
+      expect(
+        playlist.keyUri,
+        Uri.parse('https://stream.beatport.com/audio/1234/key.bin'),
+      );
       expect(playlist.isEncrypted, isTrue);
       expect(playlist.iv!.first, 0x01);
       expect(playlist.iv!.last, 0x10);
@@ -61,8 +65,10 @@ segment1.ts
 ''', base);
 
       expect(playlist.keyUri, Uri.parse('https://keys.beatport.com/k/9'));
-      expect(playlist.segments.single,
-          Uri.parse('https://stream.beatport.com/cdn/segment0.ts'));
+      expect(
+        playlist.segments.single,
+        Uri.parse('https://stream.beatport.com/cdn/segment0.ts'),
+      );
     });
 
     test('treats METHOD=NONE as unencrypted', () {
@@ -96,8 +102,9 @@ segment1.ts
 
   group('parseAttributes', () {
     test('keeps a quoted URI containing a comma intact', () {
-      final attributes =
-          parseAttributes('METHOD=AES-128,URI="https://x/k?a=1,2",IV=0xFF');
+      final attributes = parseAttributes(
+        'METHOD=AES-128,URI="https://x/k?a=1,2",IV=0xFF',
+      );
       expect(attributes['METHOD'], 'AES-128');
       expect(attributes['URI'], 'https://x/k?a=1,2');
       expect(attributes['IV'], '0xFF');
@@ -138,18 +145,12 @@ segment1.ts
       final plain = Uint8List.fromList(List.generate(32, (i) => i));
       final ciphertext = encrypt(plain, key, iv);
       expect(ciphertext, hasLength(48));
-      expect(
-        decryptSegment(ciphertext, StreamKey(value: key, iv: iv)),
-        plain,
-      );
+      expect(decryptSegment(ciphertext, StreamKey(value: key, iv: iv)), plain);
     });
 
     test('rejects ciphertext that is not block aligned', () {
       expect(
-        () => decryptSegment(
-          Uint8List(17),
-          StreamKey(value: key, iv: iv),
-        ),
+        () => decryptSegment(Uint8List(17), StreamKey(value: key, iv: iv)),
         throwsA(isA<HlsException>()),
       );
     });
@@ -177,21 +178,24 @@ segment1.ts
     });
 
     test('rejects a zero or oversized padding length', () {
-      expect(() => stripPkcs7(Uint8List.fromList([1, 0])),
-          throwsA(isA<HlsException>()));
-      expect(() => stripPkcs7(Uint8List.fromList([1, 17])),
-          throwsA(isA<HlsException>()));
-      expect(() => stripPkcs7(Uint8List.fromList([5])),
-          throwsA(isA<HlsException>()));
+      expect(
+        () => stripPkcs7(Uint8List.fromList([1, 0])),
+        throwsA(isA<HlsException>()),
+      );
+      expect(
+        () => stripPkcs7(Uint8List.fromList([1, 17])),
+        throwsA(isA<HlsException>()),
+      );
+      expect(
+        () => stripPkcs7(Uint8List.fromList([5])),
+        throwsA(isA<HlsException>()),
+      );
     });
   });
 
   group('sanitizeFileName', () {
     test('removes characters the filesystem forbids', () {
-      expect(
-        sanitizeFileName('AC/DC: Back <in> Black?'),
-        'ACDC Back in Black',
-      );
+      expect(sanitizeFileName('AC/DC: Back <in> Black?'), 'ACDC Back in Black');
     });
 
     test('collapses whitespace and trims trailing dots', () {

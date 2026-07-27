@@ -1,7 +1,9 @@
-# The live suite talks to the real Beatport API and needs credentials in
-# BEATPORT_USERNAME and BEATPORT_PASSWORD. Excluded from the default run:
-#   flutter test                          unit tests only
-#   flutter test --tags live              include the live suite
+# The live suite talks to the real Beatport API and needs credentials
+# (BEATPORT_USERNAME and BEATPORT_PASSWORD, or BPCAT_CREDENTIALS for the
+# download suite). Live-tagged tests are skipped by default so the normal
+# run stays offline:
+#   flutter test                              unit tests only
+#   flutter test --tags live --run-skipped    include the live suite
 tags:
   live:
-    skip: false
+    skip: "needs Beatport credentials; run with --tags live --run-skipped"

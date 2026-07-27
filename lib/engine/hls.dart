@@ -40,7 +40,11 @@ class StreamKey {
 
 /// A parsed media playlist: where the segments are and how to decrypt them.
 class MediaPlaylist {
-  const MediaPlaylist({required this.segments, required this.keyUri, required this.iv});
+  const MediaPlaylist({
+    required this.segments,
+    required this.keyUri,
+    required this.iv,
+  });
 
   /// Absolute segment URIs, in playback order.
   final List<Uri> segments;
@@ -176,7 +180,10 @@ Future<(MediaPlaylist, StreamKey?)> loadStream(
   try {
     final response = await client.get(streamUrl);
     if (response.statusCode != 200) {
-      throw BeatportException(response.statusCode, 'could not read the stream playlist');
+      throw BeatportException(
+        response.statusCode,
+        'could not read the stream playlist',
+      );
     }
 
     final playlist = parseMediaPlaylist(response.body, streamUrl);
@@ -185,7 +192,10 @@ Future<(MediaPlaylist, StreamKey?)> loadStream(
 
     final keyResponse = await client.get(keyUri);
     if (keyResponse.statusCode != 200) {
-      throw BeatportException(keyResponse.statusCode, 'could not read the stream key');
+      throw BeatportException(
+        keyResponse.statusCode,
+        'could not read the stream key',
+      );
     }
     final value = Uint8List.fromList(keyResponse.bodyBytes);
     if (value.length != _aesBlockSize) {

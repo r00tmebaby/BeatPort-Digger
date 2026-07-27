@@ -25,10 +25,13 @@ class BeatportClient {
     final uri = Uri.parse(
       '$baseUrl$path',
     ).replace(queryParameters: params.isEmpty ? null : params);
-    return _http.get(uri, headers: {
-      ...defaultHeaders,
-      'Authorization': '${token.tokenType} ${token.accessToken}',
-    });
+    return _http.get(
+      uri,
+      headers: {
+        ...defaultHeaders,
+        'Authorization': '${token.tokenType} ${token.accessToken}',
+      },
+    );
   }
 
   Future<Map<String, dynamic>> get(

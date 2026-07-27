@@ -227,8 +227,9 @@ class Downloader {
       '${directory.path}${Platform.pathSeparator}$baseName${download.extension}',
     );
 
-    final response =
-        await _http.send(http.Request('GET', Uri.parse(download.location)));
+    final response = await _http.send(
+      http.Request('GET', Uri.parse(download.location)),
+    );
     if (response.statusCode != 200) {
       throw BeatportException(response.statusCode, 'download failed');
     }
@@ -274,8 +275,9 @@ class Downloader {
     final (playlist, key) = await loadStream(streamUrl, httpClient: _http);
     cancellation?.throwIfCancelled();
 
-    final transport =
-        File('${directory.path}${Platform.pathSeparator}$baseName.aac');
+    final transport = File(
+      '${directory.path}${Platform.pathSeparator}$baseName.aac',
+    );
     final sink = transport.openWrite();
     var bytes = 0;
 
@@ -326,7 +328,9 @@ class Downloader {
       return DownloadResult(path: transport.path, remuxed: false);
     }
 
-    final output = File('${directory.path}${Platform.pathSeparator}$baseName.m4a');
+    final output = File(
+      '${directory.path}${Platform.pathSeparator}$baseName.m4a',
+    );
     await _remux(tool, transport, output);
     await transport.delete().catchError((_) => transport);
     return DownloadResult(path: output.path, remuxed: true);
@@ -336,9 +340,7 @@ class Downloader {
   Directory _resolveDirectory(Directory base, Track track, String template) {
     final segments = folderSegments(template, track);
     if (segments.isEmpty) return base;
-    return Directory(
-      [base.path, ...segments].join(Platform.pathSeparator),
-    );
+    return Directory([base.path, ...segments].join(Platform.pathSeparator));
   }
 
   /// Writes a track to [directory] for previewing.
@@ -370,8 +372,9 @@ class Downloader {
     cancellation?.throwIfCancelled();
 
     await directory.create(recursive: true);
-    final target =
-        File('${directory.path}${Platform.pathSeparator}$trackId.aac');
+    final target = File(
+      '${directory.path}${Platform.pathSeparator}$trackId.aac',
+    );
 
     final wanted = segments == null
         ? playlist.segments.length

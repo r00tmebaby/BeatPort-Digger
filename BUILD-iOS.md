@@ -24,8 +24,8 @@ The project is already configured for iOS:
 ## First-time setup on the Mac
 
 ```bash
-git clone https://github.com/r00tmebaby/beatport_digger.git
-cd beatport_digger
+git clone https://github.com/r00tmebaby/BeatPort-Digger.git
+cd BeatPort-Digger
 flutter pub get
 cd ios && pod install && cd ..
 ```

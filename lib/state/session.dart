@@ -51,7 +51,9 @@ class Session extends ChangeNotifier {
   Future<void> restore() async {
     try {
       final cached = await _auth.loadCached();
-      status = cached == null ? SessionStatus.signedOut : SessionStatus.signedIn;
+      status = cached == null
+          ? SessionStatus.signedOut
+          : SessionStatus.signedIn;
     } on Exception {
       status = SessionStatus.signedOut;
     }

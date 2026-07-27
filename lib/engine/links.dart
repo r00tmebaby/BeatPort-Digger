@@ -41,7 +41,11 @@ class LinkException implements Exception {
   String toString() => message;
 }
 
-const Set<String> _hosts = {'www.beatport.com', 'beatport.com', 'api.beatport.com'};
+const Set<String> _hosts = {
+  'www.beatport.com',
+  'beatport.com',
+  'api.beatport.com',
+};
 
 /// Segments that identify a type, mapped to where the id sits after them.
 ///

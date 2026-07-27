@@ -43,7 +43,9 @@ String validateOrderBy(String orderBy) {
   final field = orderBy.startsWith('-') ? orderBy.substring(1) : orderBy;
   if (field.isNotEmpty && !orderByFields.contains(field)) {
     final allowed = (orderByFields.toList()..sort()).join(', ');
-    throw ArgumentError('unknown order_by "$orderBy"; expected one of: $allowed');
+    throw ArgumentError(
+      'unknown order_by "$orderBy"; expected one of: $allowed',
+    );
   }
   return orderBy;
 }
@@ -215,8 +217,9 @@ class Catalog {
   }
 
   /// The HLS stream for a track, used by the downloader.
-  Future<TrackStream> trackStream(int trackId) async =>
-      TrackStream.fromJson(await client.get('/catalog/tracks/$trackId/stream/'));
+  Future<TrackStream> trackStream(int trackId) async => TrackStream.fromJson(
+    await client.get('/catalog/tracks/$trackId/stream/'),
+  );
 
   /// A direct download URL for a track at the requested quality.
   Future<TrackDownload> trackDownload(int trackId, String quality) async =>
@@ -378,7 +381,8 @@ class Catalog {
   /// the rest.
   Future<List<TrackQuery>?> _divide(TrackQuery query) async {
     final hasGenre = query.genreId != null && query.genreId!.isNotEmpty;
-    final hasSubGenre = query.subGenreId != null && query.subGenreId!.isNotEmpty;
+    final hasSubGenre =
+        query.subGenreId != null && query.subGenreId!.isNotEmpty;
 
     if (!hasGenre && !hasSubGenre) {
       final parts = <TrackQuery>[];
@@ -489,7 +493,9 @@ class Catalog {
       if (total > query.perPage && low.isBefore(high)) {
         // Halve and revisit. The later half is pushed first so the earlier half
         // is popped, keeping the output chronological.
-        final midpoint = low.add(Duration(days: high.difference(low).inDays ~/ 2));
+        final midpoint = low.add(
+          Duration(days: high.difference(low).inDays ~/ 2),
+        );
         pending.add((midpoint.add(const Duration(days: 1)), high));
         pending.add((low, midpoint));
         continue;

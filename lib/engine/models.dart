@@ -36,12 +36,7 @@ class Named {
 }
 
 class Key {
-  const Key({
-    this.id,
-    this.name,
-    this.camelotNumber,
-    this.camelotLetter,
-  });
+  const Key({this.id, this.name, this.camelotNumber, this.camelotLetter});
 
   /// The catalog's key id. Filtering uses this rather than the name: the API
   /// returns nothing for a comma-joined key_name, and honours only the last
@@ -69,7 +64,9 @@ class Key {
   List<String> neighbours() {
     final number = camelotNumber;
     final rawLetter = camelotLetter;
-    if (number == null || rawLetter == null || rawLetter.isEmpty) return const [];
+    if (number == null || rawLetter == null || rawLetter.isEmpty) {
+      return const [];
+    }
     final letter = rawLetter.toUpperCase();
     final up = number % 12 + 1;
     final down = (number - 2) % 12 + 1;

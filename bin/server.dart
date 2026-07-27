@@ -346,12 +346,13 @@ Handler _staticOrHint() {
   );
 }
 
-Middleware _corsMiddleware() => (Handler inner) => (Request request) async {
-  if (request.method == 'OPTIONS') {
-    return Response.ok('', headers: _cors);
-  }
-  return inner(request);
-};
+Middleware _corsMiddleware() =>
+    (Handler inner) => (Request request) async {
+      if (request.method == 'OPTIONS') {
+        return Response.ok('', headers: _cors);
+      }
+      return inner(request);
+    };
 
 Future<void> main(List<String> args) async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
@@ -364,10 +365,7 @@ Future<void> main(List<String> args) async {
     ..get('/api/genres', _genres)
     ..get('/api/preview/<id>', _preview);
 
-  final handler = Cascade()
-      .add(api.call)
-      .add(_staticOrHint())
-      .handler;
+  final handler = Cascade().add(api.call).add(_staticOrHint()).handler;
 
   final pipeline = const Pipeline()
       .addMiddleware(logRequests())
@@ -379,7 +377,9 @@ Future<void> main(List<String> args) async {
 
   // Print the LAN addresses so the phone knows where to point.
   stdout.writeln('BeatPort Digger backend listening on port ${server.port}');
-  for (final interface in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+  for (final interface in await NetworkInterface.list(
+    type: InternetAddressType.IPv4,
+  )) {
     for (final addr in interface.addresses) {
       stdout.writeln('  http://${addr.address}:${server.port}');
     }

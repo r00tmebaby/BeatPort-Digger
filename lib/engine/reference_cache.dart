@@ -36,8 +36,7 @@ class ReferenceData {
   Map<String, dynamic> toJson() => {
     'fetched_at': fetchedAt?.toIso8601String(),
     'genres': [
-      for (final g in genres)
-        {'id': g.id, 'name': g.name, 'slug': g.slug},
+      for (final g in genres) {'id': g.id, 'name': g.name, 'slug': g.slug},
     ],
     'sub_genres': {
       for (final entry in subGenres.entries)

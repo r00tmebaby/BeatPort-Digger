@@ -83,7 +83,11 @@ void main() {
         artistName: 'Beyer',
         isHype: true,
       );
-      final described = describeQuery(query, const Genre(id: 108, name: 'R&B'), null);
+      final described = describeQuery(
+        query,
+        const Genre(id: 108, name: 'R&B'),
+        null,
+      );
 
       expect(described, contains('Genre: R&B'));
       expect(described, contains('BPM: 124:124'));
