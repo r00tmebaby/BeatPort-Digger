@@ -30,6 +30,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       - name: Build APK
@@ -55,6 +56,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       - name: Build Windows app
@@ -81,11 +83,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libmpv-dev mpv
+            libgtk-3-dev liblzma-dev libmpv-dev mpv \
+            libsecret-1-dev libjsoncpp-dev
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       - name: Build Linux app
@@ -111,6 +115,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       - name: Build macOS app
@@ -139,6 +144,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       # No signing identity in CI; the IPA must be signed on install with
@@ -182,12 +188,14 @@ jobs:
 
   # Self-contained web bundle: the compiled backend next to the built UI, laid
   # out so the server finds web/frontend/dist relative to its working
-  # directory. bin/server.dart only pulls pure-Dart engine code, so it
-  # compiles to a native executable.
+  # directory. bin/server.dart only pulls pure-Dart engine code; dart build is
+  # used instead of dart compile because the app's wider dependency graph
+  # contains build-hook packages (objective_c via flutter_secure_storage).
   web-server:
     name: Web server (${{ matrix.label }})
     needs: web-frontend
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -206,18 +214,23 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
           cache: true
 
       - uses: actions/download-artifact@v8
         with:
           name: web-dist
-          path: bundle/web/frontend/dist
+          path: dist
 
       - name: Compile the server
         shell: bash
         run: |
           flutter pub get
-          dart compile exe bin/server.dart -o "bundle/${{ matrix.binary }}"
+          dart build cli --target bin/server.dart -o out
+          mv out/bundle bundle
+          mv bundle/bin/server* "bundle/bin/${{ matrix.binary }}"
+          mkdir -p bundle/web/frontend
+          mv dist bundle/web/frontend/dist
 
       - name: Add run notes
         shell: bash
@@ -225,10 +238,11 @@ jobs:
           cat > bundle/README.txt << 'EOF'
           BeatPort Digger - web version
 
-          Run the beatport-digger-server executable from this folder. It serves
-          the UI and the API on port 8080 and prints the machine's LAN
-          addresses at startup; open one of them in a browser on any device on
-          the same network and sign in with your Beatport account.
+          Run bin/beatport-digger-server (Windows: bin\beatport-digger-server.exe)
+          from this folder. It serves the UI and the API on port 8080 and prints
+          the machine's LAN addresses at startup; open one of them in a browser
+          on any device on the same network and sign in with your Beatport
+          account.
 
           Keep it on your local network: the server holds a single signed-in
           Beatport session and has no multi-user auth.
