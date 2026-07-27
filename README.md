@@ -3,8 +3,8 @@
 [![CI](https://github.com/r00tmebaby/BeatPort-Digger/actions/workflows/ci.yml/badge.svg)](https://github.com/r00tmebaby/BeatPort-Digger/actions/workflows/ci.yml)
 [![Release](https://github.com/r00tmebaby/BeatPort-Digger/actions/workflows/release.yml/badge.svg)](https://github.com/r00tmebaby/BeatPort-Digger/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/r00tmebaby/BeatPort-Digger)](https://github.com/r00tmebaby/BeatPort-Digger/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/r00tmebaby/BeatPort-Digger/total)](https://github.com/r00tmebaby/BeatPort-Digger/releases)
-[![License](https://img.shields.io/github/license/r00tmebaby/BeatPort-Digger)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/r00tmebaby/BeatPort-Digger/total?cacheSeconds=300)](https://github.com/r00tmebaby/BeatPort-Digger/releases)
+[![License](https://img.shields.io/github/license/r00tmebaby/BeatPort-Digger?cacheSeconds=300)](LICENSE)
 
 BeatPort Digger is a cross-platform client for the Beatport catalogue. It signs
 in with a Beatport account, searches the catalogue, plays track previews and
