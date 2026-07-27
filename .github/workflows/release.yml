@@ -20,9 +20,9 @@ jobs:
     name: Android APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -41,7 +41,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk \
             "staging/BeatPort-Digger-${{ github.ref_name }}-android.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-android
           path: staging/*
@@ -50,7 +50,7 @@ jobs:
     name: Windows x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -66,7 +66,7 @@ jobs:
           Compress-Archive -Path build\windows\x64\runner\Release\* `
             -DestinationPath "staging\BeatPort-Digger-${{ github.ref_name }}-windows-x64.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-windows
           path: staging/*
@@ -75,7 +75,7 @@ jobs:
     name: Linux x64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -97,7 +97,7 @@ jobs:
           tar -C build/linux/x64/release/bundle \
             -czf "staging/BeatPort-Digger-${{ github.ref_name }}-linux-x64.tar.gz" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: staging/*
@@ -106,7 +106,7 @@ jobs:
     name: macOS app
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -125,7 +125,7 @@ jobs:
             "build/macos/Build/Products/Release/BeatPort Digger.app" \
             "staging/BeatPort-Digger-${{ github.ref_name }}-macos-universal.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-macos
           path: staging/*
@@ -134,7 +134,7 @@ jobs:
     name: iOS IPA (unsigned)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -152,7 +152,7 @@ jobs:
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qr "staging/BeatPort-Digger-${{ github.ref_name }}-ios-unsigned.ipa" Payload
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-ios
           path: staging/*
@@ -161,9 +161,9 @@ jobs:
     name: Web UI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -175,7 +175,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/frontend/dist
@@ -201,14 +201,14 @@ jobs:
             binary: beatport-digger-server
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: bundle/web/frontend/dist
@@ -245,7 +245,7 @@ jobs:
             zip -qr "../staging/BeatPort-Digger-${{ github.ref_name }}-web-${{ matrix.label }}.zip" .
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-web-${{ matrix.label }}
           path: staging/*
@@ -256,13 +256,13 @@ jobs:
     needs: [android, windows, linux, macos, ios, web-server]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
