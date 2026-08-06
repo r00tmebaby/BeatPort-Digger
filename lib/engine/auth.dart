@@ -47,6 +47,8 @@ class Authenticator {
 
   TokenPair? token;
 
+  Future<bool>? _refreshing;
+
   bool get isAuthenticated => token != null;
 
   Future<TokenPair?> loadCached({String? username, String? password}) async {
@@ -76,10 +78,27 @@ class Authenticator {
     }
   }
 
+  /// Renews the current token. Returns false when a fresh login is required.
+  ///
+  /// Concurrent callers (e.g. several downloads hitting 401 at once) share a
+  /// single in-flight refresh instead of each spending the refresh token:
+  /// Beatport's refresh tokens are single-use, so a second request that
+  /// raced ahead with the old token would be rejected and read as a fully
+  /// expired session even though the first refresh actually succeeded.
   Future<bool> refresh() async {
+    final inFlight = _refreshing;
+    if (inFlight != null) return inFlight;
+
     final current = token;
     if (current == null) return false;
-    return await _tryRefresh(current) != null;
+
+    final future = _tryRefresh(current).then((renewed) => renewed != null);
+    _refreshing = future;
+    try {
+      return await future;
+    } finally {
+      _refreshing = null;
+    }
   }
 
   Future<TokenPair> logIn(String username, String password) async {

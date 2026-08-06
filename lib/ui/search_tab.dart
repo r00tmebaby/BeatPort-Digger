@@ -245,13 +245,19 @@ class _SearchTabState extends State<SearchTab> {
       source,
       label: label.isEmpty ? 'All results' : label,
     );
-    if (mounted) _queued(added);
+    if (mounted) _queued(added, error: queue.discoverError);
   }
 
-  void _queued(int added) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Queued $added tracks.')));
+  void _queued(int added, {String? error}) {
+    final message = error == null
+        ? 'Queued $added tracks.'
+        : 'Queued $added tracks, then stopped early: $error';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: Duration(seconds: error == null ? 4 : 8),
+      ),
+    );
   }
 
   Future<void> _queueEverything(Session session, DownloadQueue queue) async {
@@ -339,7 +345,7 @@ class _SearchTabState extends State<SearchTab> {
           ? 'Whole catalog'
           : _activeFilters.join(', '),
     );
-    if (mounted) _queued(added);
+    if (mounted) _queued(added, error: queue.discoverError);
   }
 
   int get _filterCount {

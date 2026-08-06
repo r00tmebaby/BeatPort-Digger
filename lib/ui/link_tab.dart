@@ -46,7 +46,12 @@ class _LinkTabState extends State<LinkTab> {
     );
     if (!mounted) return;
     _controller.clear();
-    setState(() => _lastResult = 'Queued $added tracks from $title.');
+    final error = queue.discoverError;
+    setState(
+      () => _lastResult = error == null
+          ? 'Queued $added tracks from $title.'
+          : 'Queued $added tracks from $title, then stopped early: $error',
+    );
   }
 
   @override

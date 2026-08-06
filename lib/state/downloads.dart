@@ -79,6 +79,23 @@ class DownloadQueue extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Segment-level progress fires far more often than the UI needs to redraw
+  // (every batch of every concurrent job); at maxConcurrent=16 that is
+  // hundreds of notifyListeners() calls a second and visibly stalls the UI.
+  // Progress notifications are throttled; state-changing ones (queued,
+  // running, completed, failed) always go through _notify() directly.
+  DateTime _lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _notifyProgress() {
+    final now = DateTime.now();
+    if (now.difference(_lastProgressNotify) <
+        const Duration(milliseconds: 120)) {
+      return;
+    }
+    _lastProgressNotify = now;
+    _notify();
+  }
+
   final List<DownloadJob> _jobs = [];
 
   final Map<int, DownloadJob> _byId = {};
@@ -512,7 +529,7 @@ class DownloadQueue extends ChangeNotifier {
         cancellation: job.cancellation,
         onProgress: (progress) {
           job.progress = progress;
-          _notify();
+          _notifyProgress();
         },
       );
       job.status = JobStatus.completed;

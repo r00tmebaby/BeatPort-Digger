@@ -227,8 +227,7 @@ class _JobTile extends StatelessWidget {
               color: (job.status == JobStatus.completed && job.isSample)
                   ? scheme.tertiary
                   : null,
-              fontWeight:
-                  (job.status == JobStatus.completed && job.isSample)
+              fontWeight: (job.status == JobStatus.completed && job.isSample)
                   ? FontWeight.bold
                   : null,
             ),

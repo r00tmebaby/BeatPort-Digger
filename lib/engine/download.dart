@@ -90,7 +90,11 @@ class DownloadCancelled implements Exception {
 }
 
 class PreviewResult {
-  const PreviewResult({required this.file, required this.isSample, this.sampleReason});
+  const PreviewResult({
+    required this.file,
+    required this.isSample,
+    this.sampleReason,
+  });
 
   final File file;
 
