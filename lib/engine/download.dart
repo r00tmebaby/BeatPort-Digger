@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 
 import 'catalog.dart';
@@ -34,6 +35,11 @@ enum AudioQuality {
 const String defaultFileTemplate = '{artists} - {title}';
 
 const int segmentWindow = 6;
+
+/// Runs on a worker isolate via [compute]; must stay a plain top-level
+/// function (no captured state) for isolate messaging to accept it.
+Uint8List _decryptSegmentPayload((Uint8List, StreamKey) args) =>
+    decryptSegment(args.$1, args.$2);
 
 final RegExp _illegalPathChars = RegExp(r'[<>:"|?*\\/\x00-\x1f]');
 final RegExp _whitespaceRun = RegExp(r'\s+');
@@ -549,8 +555,13 @@ class Downloader {
       );
     }
     final payload = Uint8List.fromList(response.bodyBytes);
+    if (key == null) return payload;
 
-    return key == null ? payload : decryptSegment(payload, key);
+    // AES-CBC decryption is pure CPU work with no natural await point; doing
+    // it inline on the UI isolate is what froze the app once several tracks
+    // were downloading segments at once. compute() runs it on a worker
+    // isolate instead, so the frame scheduler and touch input stay free.
+    return compute(_decryptSegmentPayload, (payload, key));
   }
 
   Future<void> _remux(
