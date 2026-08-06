@@ -180,8 +180,9 @@ Future<void> main(List<String> arguments) async {
           '$quality: ${download.streamQuality} '
           '${download.location.isEmpty ? '<no location>' : safeUrl(download.location)}',
         );
-        if (download.location.isNotEmpty)
+        if (download.location.isNotEmpty) {
           locations[quality] = download.location;
+        }
       } on BeatportException catch (exception) {
         line('$quality: $exception');
         finding('download endpoint refused $quality: $exception');

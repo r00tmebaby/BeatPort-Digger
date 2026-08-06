@@ -274,7 +274,9 @@ class DownloadQueue extends ChangeNotifier {
       if (colours is bool) colourByStatus = colours;
 
       _notify();
-    } on Object {}
+    } on Object {
+      // Best-effort settings load; fall back to defaults on any error.
+    }
   }
 
   Future<void> saveSettings() async {
@@ -291,7 +293,9 @@ class DownloadQueue extends ChangeNotifier {
           if (destinationOverride != null) 'destination': destinationOverride,
         }),
       );
-    } on Object {}
+    } on Object {
+      // Best-effort settings save; ignore write failures (e.g. read-only fs).
+    }
   }
 
   Future<File> _historyFile() async {
@@ -314,7 +318,9 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
       _notify();
-    } on Object {}
+    } on Object {
+      // Best-effort history load; a corrupt/missing file just starts empty.
+    }
     unawaited(verifyHistory());
   }
 
@@ -362,7 +368,9 @@ class DownloadQueue extends ChangeNotifier {
       await file.writeAsString(
         jsonEncode([for (final e in _history.values) e.toJson()]),
       );
-    } on Object {}
+    } on Object {
+      // Best-effort history save; ignore write failures (e.g. read-only fs).
+    }
   }
 
   DownloadJob? jobFor(Track track) {

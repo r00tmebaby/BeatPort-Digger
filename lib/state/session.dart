@@ -108,7 +108,9 @@ class Session extends ChangeNotifier {
     try {
       final fresh = await _reference.refresh();
       _applyReference(fresh);
-    } on Object {}
+    } on Object {
+      // Best-effort background refresh; keep using the cached data.
+    }
   }
 
   void _applyReference(ReferenceData data) {

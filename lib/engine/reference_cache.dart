@@ -110,7 +110,10 @@ class ReferenceCache {
       if (id == null) continue;
       try {
         subs[id] = await catalog.subGenres(id);
-      } on Object {}
+      } on Object {
+        // Best-effort: skip this genre's sub-genres rather than fail the
+        // whole reference refresh over one bad lookup.
+      }
     }
 
     final data = ReferenceData(
@@ -128,7 +131,9 @@ class ReferenceCache {
       final file = await _file();
       await file.parent.create(recursive: true);
       await file.writeAsString(jsonEncode(data.toJson()));
-    } on Object {}
+    } on Object {
+      // Best-effort cache write; a failed save just means we refetch later.
+    }
   }
 
   static const ReferenceData _empty = ReferenceData(

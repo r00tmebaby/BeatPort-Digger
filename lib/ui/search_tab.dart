@@ -162,7 +162,9 @@ class _SearchTabState extends State<SearchTab> {
     try {
       final subs = await session.catalog.subGenres(genre!.id!);
       if (mounted) setState(() => _subGenres = subs);
-    } on Exception {}
+    } on Exception {
+      // Best-effort sub-genre fetch; leave the list empty on failure.
+    }
   }
 
   Future<void> _run(Session session) => _load(session, page: 1, fresh: true);

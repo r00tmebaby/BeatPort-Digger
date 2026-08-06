@@ -1,6 +1,5 @@
 library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:beatport_digger/engine/auth.dart';
