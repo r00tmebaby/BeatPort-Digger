@@ -7,7 +7,6 @@ void main() {
       final debouncer = Debouncer(delay: const Duration(milliseconds: 40));
       var runs = 0;
 
-      // Five rapid calls, as typing five characters would.
       for (var i = 0; i < 5; i++) {
         debouncer.run(() => runs += 1);
         await Future<void>.delayed(const Duration(milliseconds: 5));
@@ -34,7 +33,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       debouncer.run(() => runs += 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      // The first would have fired by now if it had not been rescheduled.
+
       expect(runs, 0);
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(runs, 1);

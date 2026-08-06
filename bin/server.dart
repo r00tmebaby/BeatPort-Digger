@@ -1,13 +1,3 @@
-/// BeatPort Digger web backend.
-///
-/// A small HTTP server that reuses the app's Dart engine so a browser (phone,
-/// tablet, laptop) can search and preview the Beatport catalogue without a
-/// native app. The browser cannot call Beatport directly - CORS, auth and the
-/// encrypted HLS previews all need a server - so this stands in the middle.
-///
-/// Single user by design: it holds one signed-in session in memory. Run it on a
-/// machine the phone can reach and open `http://ADDRESS:8080` in a browser,
-/// where ADDRESS is one of the LAN addresses printed at startup.
 library;
 
 import 'dart:async';
@@ -29,8 +19,6 @@ import 'package:beatport_digger/engine/hls.dart';
 import 'package:beatport_digger/engine/models.dart';
 import 'package:beatport_digger/engine/token.dart';
 
-/// Keeps the token in memory: the server is one process for one user, so there
-/// is nothing to persist between requests.
 class InMemoryTokenStore implements TokenStore {
   TokenPair? _token;
 
@@ -47,14 +35,10 @@ class InMemoryTokenStore implements TokenStore {
 final http.Client _http = http.Client();
 Catalog? _catalog;
 
-/// Disk cache of assembled previews, so a track is decrypted once and replays
-/// (and downloads) are served straight from the file.
 final Directory _previewCache = Directory(
   '${Directory.systemTemp.path}${Platform.pathSeparator}beatport_digger_previews',
 );
 
-/// How many segments to fetch at once. The segments are independent, so pulling
-/// more in parallel loads the preview faster, up to what the connection allows.
 const int _segmentWindow = 32;
 
 const Map<String, String> _cors = {
@@ -124,8 +108,6 @@ Future<Response> _login(Request request) async {
 
 Response _status(Request request) => _ok({'authenticated': _catalog != null});
 
-// A short-lived cache of identical searches, so paging back and forth or
-// repeating a query is instant instead of another round-trip to Beatport.
 final Map<String, ({DateTime at, String body})> _searchCache = {};
 const Duration _searchTtl = Duration(seconds: 120);
 
@@ -140,7 +122,7 @@ Future<Response> _search(Request request) async {
   final genre = int.tryParse(q['genre'] ?? '');
   final sort = _blankToNull(q['sort']) ?? '-publish_date';
   final page = int.tryParse(q['page'] ?? '1') ?? 1;
-  // Fewer results per page come back noticeably faster; the UI can ask for more.
+
   final perPage = (int.tryParse(q['perPage'] ?? '') ?? 60).clamp(10, 150);
 
   final cacheKey = request.url.query;
@@ -176,7 +158,6 @@ Future<Response> _search(Request request) async {
   }
 }
 
-/// Camelot codes that mix harmonically with [code]: same key, +/-1, relative.
 List<String> _harmonicNeighbours(String code) {
   final match = RegExp(r'^(\d{1,2})([AB])$').firstMatch(code.toUpperCase());
   if (match == null) return const [];
@@ -245,14 +226,11 @@ Future<Response> _genres(Request request) async {
 
 const Map<String, String> _audioHeaders = {
   'content-type': 'audio/aac',
-  // Let the browser cache a preview it has already fetched.
+
   'cache-control': 'public, max-age=86400',
   ..._cors,
 };
 
-/// Assembles a track's encrypted HLS preview into a plain AAC body the browser
-/// can play. Cached to disk so it is decrypted once; segments are fetched in
-/// parallel so the first play is quick.
 Future<Response> _preview(Request request, String rawId) async {
   final catalog = _catalog;
   if (catalog == null) return _error(401, 'Sign in first.');
@@ -275,7 +253,6 @@ Future<Response> _preview(Request request, String rawId) async {
       httpClient: _http,
     );
 
-    // Fetch and decrypt the segments in parallel windows, keeping order.
     final segments = playlist.segments;
     final parts = List<Uint8List?>.filled(segments.length, null);
     for (var start = 0; start < segments.length; start += _segmentWindow) {
@@ -292,7 +269,6 @@ Future<Response> _preview(Request request, String rawId) async {
     }
     final bytes = builder.takeBytes();
 
-    // Write the cache without blocking the response.
     unawaited(
       _previewCache
           .create(recursive: true)
@@ -308,7 +284,6 @@ Future<Response> _preview(Request request, String rawId) async {
   }
 }
 
-/// Fetches one segment and decrypts it when the playlist carries a key.
 Future<Uint8List> _fetchSegment(Uri url, StreamKey? key) async {
   final response = await _http.get(url);
   if (response.statusCode != 200) {
@@ -318,9 +293,6 @@ Future<Uint8List> _fetchSegment(Uri url, StreamKey? key) async {
   return key == null ? payload : decryptSegment(payload, key);
 }
 
-/// Serves the built React app (web/frontend/dist) when it exists, so the whole
-/// thing runs from one origin in production. In development the React dev server
-/// proxies /api here instead.
 Handler _staticOrHint() {
   final dist = Directory('web/frontend/dist');
   if (dist.existsSync()) {
@@ -375,7 +347,6 @@ Future<void> main(List<String> args) async {
   final server = await shelf_io.serve(pipeline, InternetAddress.anyIPv4, port);
   server.autoCompress = true;
 
-  // Print the LAN addresses so the phone knows where to point.
   stdout.writeln('BeatPort Digger backend listening on port ${server.port}');
   for (final interface in await NetworkInterface.list(
     type: InternetAddressType.IPv4,

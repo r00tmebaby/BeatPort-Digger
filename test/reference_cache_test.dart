@@ -30,8 +30,6 @@ void main() {
     });
 
     test('sub-genre keys survive as ints, not strings', () {
-      // JSON object keys are always strings; a bad parse would lose the int
-      // lookup the genre picker depends on.
       final restored = ReferenceData.fromJson(data.toJson());
       expect(restored.subGenres.keys, containsAll([1, 6]));
       expect(restored.subGenres[1], isNotNull);

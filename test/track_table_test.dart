@@ -6,10 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 Track track(int id, String title) => Track(id: id, name: title);
 
 Widget host(Widget child) => MaterialApp(
-  home: Scaffold(
-    // Wide enough that the table renders as the columned layout, not cards.
-    body: SizedBox(width: 1000, height: 400, child: child),
-  ),
+  home: Scaffold(body: SizedBox(width: 1000, height: 400, child: child)),
 );
 
 void main() {
@@ -20,15 +17,12 @@ void main() {
     await tester.pumpWidget(host(TrackTable(tracks: tracks)));
     await tester.pumpAndSettle();
 
-    // The header labels are present before scrolling.
     expect(find.text('Artists'), findsOneWidget);
     expect(find.text('Title'), findsOneWidget);
 
     await tester.drag(find.byType(ListView), const Offset(0, -2000));
     await tester.pumpAndSettle();
 
-    // Still present: the header is pinned outside the scroll view. As row 0 of
-    // the ListView it would have scrolled off.
     expect(find.text('Artists'), findsOneWidget);
     expect(find.text('Title'), findsOneWidget);
   });

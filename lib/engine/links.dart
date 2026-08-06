@@ -1,11 +1,5 @@
-/// Recognising Beatport URLs.
-///
-/// Store and API URLs both appear in the wild, and the store uses two shapes:
-/// a slugged form where the id trails the slug (/track/name/123) and a bare
-/// form used by the API (/tracks/123).
 library;
 
-/// The kind of thing a link points at.
 enum LinkType { track, release, playlist, chart, label, artist }
 
 class BeatportLink {
@@ -18,7 +12,6 @@ class BeatportLink {
   final LinkType type;
   final int id;
 
-  /// Filters carried on the URL, passed through to the listing request.
   final Map<String, String> query;
 
   @override
@@ -47,10 +40,6 @@ const Set<String> _hosts = {
   'api.beatport.com',
 };
 
-/// Segments that identify a type, mapped to where the id sits after them.
-///
-/// The slugged store form puts a slug between the type and the id; the bare
-/// form does not.
 const Map<String, (LinkType, int)> _routes = {
   'track': (LinkType.track, 1),
   'tracks': (LinkType.track, 0),
@@ -60,15 +49,13 @@ const Map<String, (LinkType, int)> _routes = {
   'labels': (LinkType.label, 0),
   'artist': (LinkType.artist, 1),
   'artists': (LinkType.artist, 0),
-  // The store calls a curated list a chart under /chart/ and /playlist/, while
-  // /playlists/ is a user's own library list. They are different endpoints.
+
   'chart': (LinkType.chart, 1),
   'charts': (LinkType.chart, 0),
   'playlist': (LinkType.chart, 1),
   'playlists': (LinkType.playlist, 0),
 };
 
-/// Parses a Beatport URL, or throws [LinkException].
 BeatportLink parseBeatportLink(String input) {
   final trimmed = input.trim();
   if (trimmed.isEmpty) throw LinkException('Enter a Beatport link.');
@@ -86,14 +73,13 @@ BeatportLink parseBeatportLink(String input) {
 
   var segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
 
-  // Strip a locale prefix such as /en/ or /de/, then an optional /catalog/.
   if (segments.length > 1 && segments.first.length == 2) {
     segments = segments.sublist(1);
   }
   if (segments.length > 1 && segments.first == 'catalog') {
     segments = segments.sublist(1);
   }
-  // A library list is /library/playlists/<id>; drop the wrapper.
+
   if (segments.length > 1 && segments.first == 'library') {
     segments = segments.sublist(1);
     if (segments.first == 'playlist') segments[0] = 'playlists';
@@ -108,8 +94,7 @@ BeatportLink parseBeatportLink(String input) {
 
   final (type, offset) = route;
   final index = 1 + offset;
-  // Guard the index before reading it, so a bare /library or /track reports a
-  // missing id instead of crashing.
+
   if (index >= segments.length) {
     throw LinkException('That link does not include an id.');
   }
@@ -122,7 +107,6 @@ BeatportLink parseBeatportLink(String input) {
   return BeatportLink(type: type, id: id, query: uri.queryParameters);
 }
 
-/// Whether [input] looks like a Beatport link, without throwing.
 bool isBeatportLink(String input) {
   try {
     parseBeatportLink(input);

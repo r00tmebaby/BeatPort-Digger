@@ -1,4 +1,3 @@
-/// Queued and finished downloads.
 library;
 
 import 'dart:io';
@@ -16,10 +15,8 @@ class DownloadsPage extends StatefulWidget {
   State<DownloadsPage> createState() => _DownloadsPageState();
 }
 
-/// How the downloads list is ordered.
 enum _JobOrder { recent, status, title, artist }
 
-/// Priority of a status when sorting by state: active work first, done last.
 int _statusRank(JobStatus status) => switch (status) {
   JobStatus.running => 0,
   JobStatus.queued => 1,
@@ -34,15 +31,12 @@ class _DownloadsPageState extends State<DownloadsPage> {
   @override
   void initState() {
     super.initState();
-    // Probe after the first frame: the check runs a process and must not block
-    // the build that is mounting this page.
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<DownloadQueue>().checkFfmpeg();
     });
   }
 
-  /// Plays a completed download and sets autoplay to step through the rest of
-  /// the completed list from here.
   void _play(
     BuildContext context,
     DownloadJob job,
@@ -59,8 +53,6 @@ class _DownloadsPageState extends State<DownloadsPage> {
     if (job.path != null) player.playLocal(job.track, job.path!);
   }
 
-  /// Jobs in display order. Recent is newest first; the rest are stable sorts
-  /// over a copy so the queue's own order is untouched.
   List<DownloadJob> _ordered(List<DownloadJob> jobs) {
     switch (_order) {
       case _JobOrder.recent:
@@ -128,8 +120,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   ],
                 ),
                 const Spacer(),
-                // Stopping everything is the action wanted in a hurry, so it is
-                // a filled button rather than buried in the per-row menu.
+
                 if (queue.activeCount > 0)
                   FilledButton.tonalIcon(
                     onPressed: queue.cancelAll,
@@ -161,8 +152,6 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 )
               : Builder(
                   builder: (context) {
-                    // Completed downloads, in display order, are what autoplay
-                    // steps through once one is played.
                     final completed = jobs
                         .where(
                           (j) =>
@@ -202,7 +191,6 @@ class _JobTile extends StatelessWidget {
   final DownloadJob job;
   final DownloadQueue queue;
 
-  /// Plays this completed download and queues the rest for autoplay.
   final VoidCallback onPlay;
 
   @override
@@ -233,7 +221,18 @@ class _JobTile extends StatelessWidget {
                   ? null
                   : progress.fraction,
             ),
-          Text(_statusLine(), style: theme.textTheme.labelSmall),
+          Text(
+            _statusLine(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: (job.status == JobStatus.completed && job.isSample)
+                  ? scheme.tertiary
+                  : null,
+              fontWeight:
+                  (job.status == JobStatus.completed && job.isSample)
+                  ? FontWeight.bold
+                  : null,
+            ),
+          ),
           if (job.error != null)
             Text(
               job.error!,
@@ -260,10 +259,18 @@ class _JobTile extends StatelessWidget {
             ? '${_megabytes(progress.bytes)} of '
                   '${_megabytes(progress.total)}'
             : _megabytes(progress.bytes),
-      // Phones show the friendly shared location; desktop shows the full path
-      // it can actually open.
+
       JobStatus.completed =>
-        Platform.isAndroid
+        job.isSample
+            ? (Platform.isAndroid
+                  ? 'Saved SAMPLE (${job.sampleReason ?? 'full track unavailable'}) '
+                        'to Music/BeatPort Digger \u2014 not the full song'
+                  : Platform.isIOS
+                  ? 'Saved SAMPLE (${job.sampleReason ?? 'full track unavailable'}) '
+                        'to the app folder (Files app) \u2014 not the full song'
+                  : 'Saved SAMPLE (${job.sampleReason ?? 'full track unavailable'}) '
+                        'to ${job.path} \u2014 not the full song')
+            : Platform.isAndroid
             ? 'Saved to Music/BeatPort Digger'
             : Platform.isIOS
             ? 'Saved to the app folder (Files app)'
@@ -313,8 +320,7 @@ class _JobTile extends StatelessWidget {
                     ),
                     onPressed: job.path == null ? null : onPlay,
                   ),
-                // Revealing a file needs a desktop file manager; phones have no
-                // equivalent, so the folder button is desktop-only.
+
                 if (!Platform.isAndroid && !Platform.isIOS)
                   IconButton(
                     tooltip: 'Show in folder',
@@ -337,7 +343,6 @@ class _JobTile extends StatelessWidget {
     }
   }
 
-  /// Opens the containing folder with the platform's file manager.
   Future<void> _reveal(String path) async {
     if (Platform.isWindows) {
       await Process.run('explorer.exe', ['/select,', path]);

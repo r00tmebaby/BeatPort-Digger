@@ -1,4 +1,3 @@
-/// The preview transport, shown while something is loaded.
 library;
 
 import 'package:flutter/material.dart';
@@ -26,8 +25,6 @@ class NowPlayingBar extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     if (track == null) {
-      // A missing preview is a fact about the track, not a failure of the app,
-      // so it reads as a neutral notice rather than a red error.
       return Material(
         color: scheme.surfaceContainerHighest,
         child: Padding(
@@ -61,8 +58,6 @@ class NowPlayingBar extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Seek row: elapsed time, a grabbable slider to scrub with, then the
-          // track length, so it reads at a glance where the preview is.
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Row(
@@ -146,16 +141,14 @@ class NowPlayingBar extends StatelessWidget {
                     height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      // Determinate once the first segment lands, so a
-                      // whole-track fetch does not look stalled.
+
                       value: player.loadProgress > 0
                           ? player.loadProgress
                           : null,
                     ),
                   ),
                 ],
-                // Autoplay: when on, the next track in the list plays
-                // automatically once this preview ends.
+
                 IconButton(
                   tooltip: player.autoplay
                       ? 'Autoplay on - plays the next track'

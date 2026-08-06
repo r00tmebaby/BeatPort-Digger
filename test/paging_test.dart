@@ -2,8 +2,6 @@ import 'package:beatport_digger/engine/catalog.dart';
 import 'package:beatport_digger/engine/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Total pages the UI should show for a result count, mirroring the search
-/// tab's arithmetic so the rule is pinned in one place.
 int totalPages(int count, int perPage) {
   final reachable = count < resultWindow ? count : resultWindow;
   if (reachable == 0) return 0;
@@ -50,8 +48,6 @@ void main() {
     });
 
     test('caps at the reachable result window', () {
-      // The API refuses an offset past resultWindow, so a count above it does
-      // not add reachable pages.
       expect(totalPages(50000, 100), resultWindow ~/ 100);
       expect(totalPages(resultWindow, 100), resultWindow ~/ 100);
     });

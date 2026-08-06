@@ -1,28 +1,16 @@
-/// The OAuth token pair, its fingerprint, and where it is cached.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
-/// The client identifier the Beatport web player presents. Its authorization
-/// code grant takes no secret, so a username and password are enough to issue a
-/// token pair without registering an OAuth application.
 const String publicClientId = 'ryZ8LuyQVPqbK2mBX2Hwt4qSMtnWuTYSqBPO92yQ';
 
-/// Renew this many seconds before the recorded expiry, so a token cannot lapse
-/// midway through a long export.
 const int refreshLeeway = 300;
 
-// 64-bit FNV-1a over "username:password", giving a stable login_id that ties a
-// cached token to the account it was issued for without storing the password.
 final BigInt _fnvOffset = BigInt.parse('cbf29ce484222325', radix: 16);
 final BigInt _fnvPrime = BigInt.parse('100000001b3', radix: 16);
 final BigInt _mask64 = (BigInt.one << 64) - BigInt.one;
 
-/// Fingerprints a credential pair so a cached token can be tied to it.
-///
-/// Lets a cache issued for one account be discarded when another logs in,
-/// without storing the password itself.
 String computeLoginId(String username, String password) {
   var digest = _fnvOffset;
   for (final byte in utf8.encode('$username:$password')) {
@@ -80,16 +68,12 @@ class TokenPair {
       ? null
       : DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000);
 
-  /// Whether the access token is due for renewal. An unknown issue time counts
-  /// as live, since there is nothing to compare against.
   bool isExpired({int leeway = refreshLeeway}) {
     if (expiresAt == 0) return false;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return now >= (expiresAt - leeway);
   }
 
-  /// A copy carrying the issue time, so expiry can be tracked locally: the
-  /// token response states a lifetime, not a deadline.
   TokenPair stamped({String loginId = ''}) => TokenPair(
     accessToken: accessToken,
     refreshToken: refreshToken,
@@ -103,15 +87,12 @@ class TokenPair {
   );
 }
 
-/// Where the token pair is kept between runs.
 abstract class TokenStore {
   Future<TokenPair?> read();
   Future<void> write(TokenPair token);
   Future<void> clear();
 }
 
-/// Keeps the token in a plain JSON file, used by tests and headless runs where
-/// a platform keychain is not available.
 class FileTokenStore implements TokenStore {
   FileTokenStore(this.path);
 

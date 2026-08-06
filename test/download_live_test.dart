@@ -1,8 +1,3 @@
-/// End-to-end download checks against the live API.
-///
-/// Needs a credentials file; set BPCAT_CREDENTIALS to point at one. Downloads
-/// a real track, so it is tagged live and skipped by default; run with:
-///   flutter test test/download_live_test.dart --run-skipped
 @Tags(['live'])
 library;
 
@@ -19,16 +14,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
-  // The downloader asks path_provider where an app-managed ffmpeg lives, which
-  // needs the binding even in a plain Dart test.
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
 
-  // The test binding installs HttpOverrides that answer every request with 400
-  // so unit tests cannot reach the network. This suite is deliberately live.
   HttpOverrides.global = null;
 
-  // path_provider has no platform implementation under flutter test; answer its
-  // channel with a temp directory so ffmpeg resolution works.
   final pluginTemp = Directory.systemTemp.createTempSync('bpcat-support');
   binding.defaultBinaryMessenger.setMockMethodCallHandler(
     const MethodChannel('plugins.flutter.io/path_provider'),
@@ -65,8 +54,7 @@ void main() {
     final grouped = await catalog.keyIdsByCamelot();
 
     expect(grouped['8A'], isNotEmpty, reason: 'A Minor must resolve');
-    // 1A is stored twice, as G# Minor and Ab Minor. Both ids must be present
-    // or half the tracks in that key are invisible to the filter.
+
     expect(grouped['1A'], hasLength(2), reason: '1A has two spellings');
   });
 
@@ -78,8 +66,6 @@ void main() {
     final page = await catalog.tracks(TrackQuery(keyId: ids, perPage: 20));
     expect(page.results, isNotEmpty);
 
-    // The bug this guards: a comma-joined key_name returns zero results, and a
-    // repeated key_name honours only the last value.
     final names = page.results.map((t) => t.key?.name).whereType<String>();
     expect(names, isNotEmpty);
     for (final name in names) {
@@ -89,7 +75,7 @@ void main() {
 
   test('resolves tracks behind a release link', () async {
     if (!available) return markTestSkipped('no credentials');
-    // Find a real release id from a track, since a hardcoded one may vanish.
+
     final page = await catalog.tracks(TrackQuery(perPage: 1));
     final payload = await catalog.client.get(
       '/catalog/tracks/${page.results.single.id}/',
@@ -128,9 +114,6 @@ void main() {
       final page = await catalog.tracks(TrackQuery(perPage: 1));
       final track = page.results.single;
 
-      // Segments are written in completion order if Future.wait's ordering is
-      // ever assumed wrongly, which would corrupt the audio while leaving the
-      // file a plausible size. Comparing the two byte for byte catches that.
       final sequentialDir = await temp.createTemp('seq');
       final parallelDir = await temp.createTemp('par');
 
@@ -177,15 +160,14 @@ void main() {
         segments: 3,
       );
 
-      // Default must cover the whole playlist, not a fixed handful of segments.
       expect(
         total,
         greaterThan(10),
         reason: 'a full track is dozens of segments',
       );
       expect(
-        await full.length(),
-        greaterThan(await short.length() * 3),
+        await full.file.length(),
+        greaterThan(await short.file.length() * 3),
         reason: 'the full preview is much longer than a three segment clip',
       );
     },
@@ -206,18 +188,15 @@ void main() {
         segments: 3,
       );
 
-      expect(await file.exists(), isTrue);
-      expect(file.path, endsWith('.aac'));
-      expect(await file.length(), greaterThan(20000));
+      expect(await file.file.exists(), isTrue);
+      expect(file.file.path, endsWith('.aac'));
+      expect(await file.file.length(), greaterThan(20000));
 
-      // The audio-only libmpv build cannot demux encrypted HLS, which is why the
-      // preview is decrypted here first. Confirm the result really is plain ADTS
-      // behind its ID3 tag, since that is what the player is handed.
-      final head = await file.openRead(0, 64).first;
+      final head = await file.file.openRead(0, 64).first;
       expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
       final tagSize =
           (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
-      final frame = await file.openRead(10 + tagSize, 12 + tagSize).first;
+      final frame = await file.file.openRead(10 + tagSize, 12 + tagSize).first;
       expect(frame[0], 0xFF);
       expect(frame[1] & 0xF0, 0xF0);
     },
@@ -243,7 +222,6 @@ void main() {
     final bytes = await file.length();
     expect(bytes, greaterThan(1000000), reason: 'a FLAC track is megabytes');
 
-    // Verify it is really FLAC, not an error page saved under the name.
     final header = await file.openRead(0, 4).first;
     expect(String.fromCharCodes(header), 'fLaC');
   }, timeout: const Timeout(Duration(minutes: 5)));
@@ -275,15 +253,9 @@ void main() {
       final bytes = await file.length();
       expect(bytes, greaterThan(100000));
 
-      // Decryption is the part that fails silently: wrong key material yields a
-      // file of plausible size that is not audio. Segments open with an ID3v2
-      // tag, and the AAC itself begins right after it, so checking both proves
-      // the plaintext is really audio rather than noise that happens to be long
-      // enough.
       final head = await file.openRead(0, 64).first;
       expect(String.fromCharCodes(head.sublist(0, 3)), 'ID3');
 
-      // ID3v2 size is synchsafe: seven bits per byte.
       final tagSize =
           (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
       final audioStart = 10 + tagSize;

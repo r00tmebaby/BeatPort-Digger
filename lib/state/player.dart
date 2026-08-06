@@ -1,8 +1,3 @@
-/// Preview playback.
-///
-/// Plays the catalog's HLS stream directly. The player handles the AES-128
-/// decryption itself, so previewing does not go through the download pipeline
-/// and nothing is written to disk.
 library;
 
 import 'dart:async';
@@ -11,9 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-// media_kit exports its own Track, meaning an audio stream within a media file.
-// Only the two types actually used are imported so it cannot shadow the
-// catalog's Track.
+
 import 'package:media_kit/media_kit.dart' show Media, Player;
 
 import '../engine/catalog.dart';
@@ -22,20 +15,19 @@ import '../engine/errors.dart';
 import '../engine/hls.dart';
 import '../engine/models.dart';
 
-/// Turns an internal error into something worth reading.
-///
-/// A 404 here is not a fault of ours: Beatport hands out a stream link for
-/// some tracks whose HLS asset does not actually exist, so the playlist or its
-/// segments come back missing. Say that plainly rather than a raw status code.
 String previewErrorMessage(Object exception) {
   if (exception is BeatportException) {
-    if (exception.status == 404 || exception.status == 403) {
-      return 'No preview available for this track.';
-    }
-    return 'Preview unavailable (${exception.status}).';
+    return switch (exception.status) {
+      404 => 'No preview available for this track.',
+      401 => 'Session expired. Sign in again.',
+      403 when exception.message.isNotEmpty =>
+        'Beatport refused this preview: ${exception.message}',
+      403 => 'Beatport refused this preview (403).',
+      _ => 'Preview unavailable (${exception.status}).',
+    };
   }
   if (exception is HlsException) {
-    return 'No preview available for this track.';
+    return 'The preview stream could not be read.';
   }
   return 'Could not play a preview of this track.';
 }
@@ -63,8 +55,7 @@ class PreviewPlayer extends ChangeNotifier {
       }),
       _player.stream.completed.listen((value) {
         if (!value) return;
-        // Roll on to the next track in the list when autoplay is on, so a set
-        // can be auditioned hands-free; otherwise just clear the transport.
+
         final finished = current;
         if (_autoplay && finished != null) {
           final next = _nextAfter(finished);
@@ -87,17 +78,12 @@ class PreviewPlayer extends ChangeNotifier {
   Directory? _cache;
   bool _disposed = false;
 
-  /// Segments to fetch, or null for the whole track.
-  ///
-  /// The whole track by default: a 30 second clip is not enough to judge a
-  /// transition, and the fetch is a few seconds because segments are pulled in
-  /// parallel and cached afterwards.
   int? previewSegments;
 
-  /// How far the preview fetch has got, while loading.
   double loadProgress = 0;
 
-  /// Whether a finished preview rolls on to the next track in the list.
+  bool isSample = false;
+
   bool _autoplay = true;
   bool get autoplay => _autoplay;
   set autoplay(bool value) {
@@ -105,10 +91,6 @@ class PreviewPlayer extends ChangeNotifier {
     _notify();
   }
 
-  /// The list autoplay steps through, set when playback starts so "next"
-  /// follows the list the user played from. [_upNextFiles] maps a track id to a
-  /// local file path when the list is downloaded tracks, so autoplay plays the
-  /// file rather than streaming a preview.
   List<Track> _upNext = const [];
   Map<int, String> _upNextFiles = const {};
   void setUpNext(List<Track> tracks, {Map<int, String> files = const {}}) {
@@ -116,21 +98,17 @@ class PreviewPlayer extends ChangeNotifier {
     _upNextFiles = files;
   }
 
-  /// The track after [track] in [_upNext], or null at the end of the list.
   Track? _nextAfter(Track track) {
     final index = _upNext.indexWhere((t) => t.id == track.id);
     if (index < 0 || index + 1 >= _upNext.length) return null;
     return _upNext[index + 1];
   }
 
-  /// Plays [track] the way its list plays it: a downloaded file when one is
-  /// known for it, otherwise a streamed preview.
   Future<void> _playInList(Track track) {
     final path = _upNextFiles[track.id];
     return path != null ? playLocal(track, path) : toggle(track);
   }
 
-  /// The track being previewed, if any.
   Track? current;
   bool playing = false;
   bool loading = false;
@@ -158,6 +136,19 @@ class PreviewPlayer extends ChangeNotifier {
     );
   }
 
+  Future<PreviewResult?> _cachedPreview(Directory directory, int id) async {
+    for (final sample in [false, true]) {
+      final file = File(
+        '${directory.path}${Platform.pathSeparator}'
+        '${previewFileName(id, sample: sample)}',
+      );
+      if (await file.exists()) {
+        return PreviewResult(file: file, isSample: sample);
+      }
+    }
+    return null;
+  }
+
   bool isCurrent(Track track) => current?.id != null && current?.id == track.id;
 
   void _notify() {
@@ -165,7 +156,6 @@ class PreviewPlayer extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Starts [track], or pauses it when it is already playing.
   Future<void> toggle(Track track) async {
     final catalog = _catalog;
     final id = track.id;
@@ -179,6 +169,7 @@ class PreviewPlayer extends ChangeNotifier {
     current = track;
     loading = true;
     loadProgress = 0;
+    isSample = false;
     error = null;
     position = Duration.zero;
     duration = Duration.zero;
@@ -189,25 +180,24 @@ class PreviewPlayer extends ChangeNotifier {
       if (downloader == null) throw StateError('player is not bound');
 
       final directory = await _cacheDirectory();
-      final cached = File('${directory.path}${Platform.pathSeparator}$id.aac');
-      // Re-previewing a track should not re-fetch it.
-      final file = await cached.exists()
-          ? cached
-          : await downloader.downloadPreview(
-              id,
-              directory,
-              segments: previewSegments,
-              onProgress: (progress) {
-                // A newer request may already own the player.
-                if (current?.id != id) return;
-                loadProgress = progress.fraction;
-                _notify();
-              },
-            );
 
-      // A newer request may have started while this one was in flight.
+      final preview =
+          await _cachedPreview(directory, id) ??
+          await downloader.downloadPreview(
+            id,
+            directory,
+            segments: previewSegments,
+            sampleUrl: track.sampleUrl,
+            onProgress: (progress) {
+              if (current?.id != id) return;
+              loadProgress = progress.fraction;
+              _notify();
+            },
+          );
+
       if (current?.id != id) return;
-      await _player.open(Media(file.path));
+      isSample = preview.isSample;
+      await _player.open(Media(preview.file.path));
     } on Object catch (exception) {
       if (current?.id == id) {
         error = _friendlyError(exception);
@@ -219,8 +209,6 @@ class PreviewPlayer extends ChangeNotifier {
     }
   }
 
-  /// Plays a downloaded file from [path], or pauses it when it is already
-  /// playing. Unlike [toggle] there is nothing to fetch: the file is on disk.
   Future<void> playLocal(Track track, String path) async {
     final id = track.id;
     if (id == null) return;
@@ -233,6 +221,8 @@ class PreviewPlayer extends ChangeNotifier {
     current = track;
     loading = true;
     loadProgress = 1;
+
+    isSample = false;
     error = null;
     position = Duration.zero;
     duration = Duration.zero;
@@ -260,6 +250,7 @@ class PreviewPlayer extends ChangeNotifier {
   Future<void> stop() async {
     current = null;
     playing = false;
+    isSample = false;
     position = Duration.zero;
     duration = Duration.zero;
     _notify();
@@ -275,7 +266,6 @@ class PreviewPlayer extends ChangeNotifier {
 
   Future<void> setVolume(double value) => _player.setVolume(value * 100);
 
-  /// Total size of the cached previews, in bytes.
   Future<int> cacheSize() async {
     final directory = await _cacheDirectory();
     if (!await directory.exists()) return 0;
@@ -286,10 +276,6 @@ class PreviewPlayer extends ChangeNotifier {
     return total;
   }
 
-  /// Removes cached preview audio.
-  ///
-  /// Stops playback first: the current track's file is in the cache and
-  /// deleting it from under the player would leave it reading a missing file.
   Future<void> clearCache() async {
     await stop();
     final directory = await _cacheDirectory();

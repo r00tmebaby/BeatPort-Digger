@@ -1,8 +1,3 @@
-/// Catalog search by filter.
-///
-/// Laid out with progressive disclosure: the fields most often typed into are
-/// always visible, and the rest collapse behind a count so the header stays
-/// short and the results keep the window.
 library;
 
 import 'package:flutter/material.dart';
@@ -18,10 +13,6 @@ import '../state/player.dart';
 import '../state/session.dart';
 import 'widgets/track_table.dart';
 
-/// Human-readable summary of the filters a query actually carried.
-///
-/// Built from the query object rather than the form controls, so a control
-/// that has drifted out of sync cannot misreport what was searched.
 List<String> describeQuery(TrackQuery query, Genre? genre, Named? subGenre) {
   final parts = <String>[];
   if (query.genreId != null && query.genreId!.isNotEmpty) {
@@ -60,21 +51,12 @@ class _SearchTabState extends State<SearchTab> {
 
   bool _showAdvanced = false;
 
-  /// Track flags to require. These are real server filters (unlike exclusive,
-  /// dj-edit and pre-order, which the API ignores), so they narrow across every
-  /// page rather than only the loaded one.
   final Set<String> _flags = {};
 
   static const _flagLabels = ['Hype', 'Classic', 'Explicit'];
 
-  /// Client-side "exclusive only", narrowing the loaded pages.
-  ///
-  /// Beatport has no server filter for exclusive, but exclusives are common
-  /// enough (~1 in 7) that filtering what is already loaded still shows plenty,
-  /// unlike the rarer flags that would come back empty.
   bool _exclusiveOnly = false;
 
-  /// The results actually shown, after the client-side exclusive filter.
   List<Track> get _shown =>
       _exclusiveOnly ? _results.where((t) => t.isExclusive).toList() : _results;
 
@@ -91,14 +73,10 @@ class _SearchTabState extends State<SearchTab> {
   Set<int> _selected = {};
   List<String> _activeFilters = const [];
 
-  // Paging. The API reports the true total but refuses an offset past its
-  // result window, so the reachable page count is capped separately.
   int _page = 1;
   int _totalCount = 0;
   bool _hasNext = false;
 
-  /// Tracks seen across every page of the current search, so a selection made
-  /// on an earlier page can still be resolved to a Track when downloaded.
   final Map<int, Track> _seenById = {};
 
   int get _totalPages {
@@ -107,11 +85,6 @@ class _SearchTabState extends State<SearchTab> {
     return (reachable + _perPage - 1) ~/ _perPage;
   }
 
-  /// Popularity rank per track id, captured from the order the API returned.
-  ///
-  /// Beatport sorts by plays and downloads but never serves the counts, so
-  /// position in the sorted result is the only measure available. Captured at
-  /// search time because sorting the table locally would otherwise destroy it.
   Map<int, int> _rank = const {};
   String? _rankLabel;
 
@@ -120,8 +93,6 @@ class _SearchTabState extends State<SearchTab> {
 
   final _debounce = Debouncer();
 
-  /// Ensures only the latest search applies its result, so overlapping
-  /// auto-searches cannot land out of order and show a superseded query.
   final _gate = RequestGate();
 
   @override
@@ -135,13 +106,11 @@ class _SearchTabState extends State<SearchTab> {
     super.dispose();
   }
 
-  /// A deliberate choice (dropdown, chip): search now.
   void _searchNow(Session session) {
     _debounce.cancel();
     _run(session);
   }
 
-  /// Typing: search once the keystrokes stop.
   void _searchSoon(Session session) => _debounce.run(() {
     if (mounted) _run(session);
   });
@@ -158,7 +127,6 @@ class _SearchTabState extends State<SearchTab> {
     return '$low:$high';
   }
 
-  /// Advanced filters currently set, for the collapsed section's badge.
   int get _advancedCount => [
     _genre != null,
     _subGenre != null,
@@ -184,7 +152,7 @@ class _SearchTabState extends State<SearchTab> {
     setState(() {
       _genre = genre;
       _subGenre = null;
-      // Show cached sub-genres at once; fall back to a fetch if not cached.
+
       _subGenres = genre?.id == null
           ? const []
           : session.subGenresFor(genre!.id!) ?? const [];
@@ -194,18 +162,11 @@ class _SearchTabState extends State<SearchTab> {
     try {
       final subs = await session.catalog.subGenres(genre!.id!);
       if (mounted) setState(() => _subGenres = subs);
-    } on Exception {
-      // A genre with no sub-genres is normal; leave the picker empty.
-    }
+    } on Exception {}
   }
 
-  /// Runs a fresh search from page one, resetting selection and paging.
   Future<void> _run(Session session) => _load(session, page: 1, fresh: true);
 
-  /// Loads one page of the current filters.
-  ///
-  /// [fresh] clears the selection and per-page accumulation; paging keeps them
-  /// so a selection can span pages.
   Future<void> _load(
     Session session, {
     required int page,
@@ -220,14 +181,13 @@ class _SearchTabState extends State<SearchTab> {
     try {
       final query = _query();
       final result = await session.catalog.tracks(query, page: page);
-      // A newer search was issued while this was in flight; its result is the
-      // one that matches the filters now on screen, so drop this one.
+
       if (!mounted || !_gate.isCurrent(ticket)) return;
       setState(() {
         _results = result.results;
         _page = page;
         _totalCount = result.count;
-        // Trust the API's own next link over page arithmetic near the window.
+
         _hasNext = result.next != null && page < _totalPages;
         _searched = true;
 
@@ -243,7 +203,6 @@ class _SearchTabState extends State<SearchTab> {
           _activeFilters = describeQuery(query, _genre, _subGenre);
         }
 
-        // Rank continues across pages: #101 on page two, not #1 again.
         final offset = (page - 1) * _perPage;
         for (var i = 0; i < result.results.length; i++) {
           final track = result.results[i];
@@ -266,19 +225,10 @@ class _SearchTabState extends State<SearchTab> {
         setState(() => _error = '$exception');
       }
     } finally {
-      // Only the latest search owns the spinner; a stale one clearing it would
-      // hide that a newer request is still running.
       if (mounted && _gate.isCurrent(ticket)) setState(() => _loading = false);
     }
   }
 
-  /// Queues every track matching the current filter, paging through all of
-  /// them rather than just the visible page.
-  ///
-  /// Reaches up to the API's 10,000-row window. Beyond that a filter needs the
-  /// date-window walk, offered separately. When the client-side exclusive
-  /// filter is on, the stream is narrowed here so it applies across all pages,
-  /// not only the loaded one.
   Future<void> _queueAllMatching(Session session, DownloadQueue queue) async {
     Stream<Track> source = session.catalog.iterTracks(
       _query(),
@@ -304,10 +254,6 @@ class _SearchTabState extends State<SearchTab> {
     ).showSnackBar(SnackBar(content: Text('Queued $added tracks.')));
   }
 
-  /// Queues every track matching the filter across a date range.
-  ///
-  /// Uses the catalog walk rather than paging: the API refuses an offset past
-  /// 10,000 rows, so paging alone cannot reach a whole genre.
   Future<void> _queueEverything(Session session, DownloadQueue queue) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -396,7 +342,6 @@ class _SearchTabState extends State<SearchTab> {
     if (mounted) _queued(added);
   }
 
-  /// How many filters are active behind the Filters button, for its badge.
   int get _filterCount {
     var count = 0;
     if (_trimmed(_artist) != null) count++;
@@ -409,8 +354,6 @@ class _SearchTabState extends State<SearchTab> {
     return count;
   }
 
-  /// The active filters as removable chips, built from the query state so each
-  /// knows how to clear itself. Shown under the search field on a phone.
   List<Widget> _activeChips(Session session) {
     final chips = <Widget>[];
     void add(String label, VoidCallback onClear) => chips.add(
@@ -474,8 +417,6 @@ class _SearchTabState extends State<SearchTab> {
     return chips;
   }
 
-  /// Phone layout: a pinned search field, a single Filters button opening a
-  /// bottom sheet, and the active filters as removable chips below.
   List<Widget> _phoneControls(Session session) {
     final chips = _activeChips(session);
     return [
@@ -512,8 +453,6 @@ class _SearchTabState extends State<SearchTab> {
         ),
       ),
       if (chips.isNotEmpty)
-        // One scrolling row, never a stack: however many filters are set, the
-        // list keeps its height.
         SizedBox(
           height: 40,
           child: ListView.separated(
@@ -527,8 +466,6 @@ class _SearchTabState extends State<SearchTab> {
     ];
   }
 
-  /// The download-everything options as an overflow menu, sat in the phone's
-  /// top bar next to Filters so the results need no separate action row.
   Widget _downloadsMenu(Session session) {
     final capped = _totalCount >= resultWindow;
     final allLabel = _exclusiveOnly
@@ -582,8 +519,6 @@ class _SearchTabState extends State<SearchTab> {
     );
   }
 
-  /// Wide layout: the full inline search form, unchanged from the desktop
-  /// design, with the flag chips shown beneath it.
   List<Widget> _wideControls(Session session) {
     return [
       Padding(
@@ -640,8 +575,7 @@ class _SearchTabState extends State<SearchTab> {
             ],
           ),
         ),
-      // Real server-side flag filters, so they narrow every page, not just the
-      // loaded one. Only the three the API honours are offered.
+
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: Wrap(
@@ -690,8 +624,6 @@ class _SearchTabState extends State<SearchTab> {
     ];
   }
 
-  /// The advanced filters in a bottom sheet, the phone's single entry point for
-  /// everything but the title search. Changes apply live behind the sheet.
   Future<void> _openFilters(Session session) {
     return showModalBottomSheet<void>(
       context: context,
@@ -722,8 +654,6 @@ class _SearchTabState extends State<SearchTab> {
                   maxHeight: media.size.height * 0.85,
                 ),
                 child: SingleChildScrollView(
-                  // Add the system navigation-bar inset so the Done button clears
-                  // the phone's on-screen buttons instead of hiding behind them.
                   padding: EdgeInsets.fromLTRB(
                     16,
                     0,
@@ -966,7 +896,7 @@ class _SearchTabState extends State<SearchTab> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: _ErrorBanner(message: _error!),
           ),
-        // Contextual: only meaningful once there is something to act on.
+
         if (_shown.isNotEmpty)
           Consumer<DownloadQueue>(
             builder: (context, queue, _) => _ActionBar(
@@ -976,8 +906,7 @@ class _SearchTabState extends State<SearchTab> {
               exclusiveActive: _exclusiveOnly,
               selectedCount: _selected.length,
               queue: queue,
-              // Resolves against every page seen, so a cross-page selection
-              // still downloads tracks that scrolled off with a page change.
+
               onDownloadSelected: () => _queued(
                 queue.enqueueAll(
                   _selected.map((id) => _seenById[id]).whereType<Track>(),
@@ -1025,8 +954,6 @@ class _SearchTabState extends State<SearchTab> {
                       onSelectionChanged: (next) =>
                           setState(() => _selected = next),
                       onPlay: (track) {
-                        // Autoplay steps through the tracks on screen once this
-                        // one finishes.
                         player.setUpNext(_shown);
                         player.toggle(track);
                       },
@@ -1042,7 +969,6 @@ class _SearchTabState extends State<SearchTab> {
     );
   }
 
-  /// Page navigation and the running total.
   Widget _pager(Session session) {
     final theme = Theme.of(context);
     final first = (_page - 1) * _perPage + 1;
@@ -1116,7 +1042,6 @@ class _SearchTabState extends State<SearchTab> {
   }
 }
 
-/// Search fields, with the less-used filters collapsed.
 class _Header extends StatelessWidget {
   const _Header({
     required this.session,
@@ -1162,13 +1087,10 @@ class _Header extends StatelessWidget {
   final ValueChanged<String> onOrderBy;
   final ValueChanged<int> onPerPage;
 
-  /// Called on every keystroke, for a debounced search.
   final VoidCallback onChanged;
 
-  /// Called on Enter or the Search button, for an immediate search.
   final VoidCallback onRun;
 
-  /// A text field that searches as you type, and at once on Enter.
   Widget _field(TextEditingController controller, String label, double width) =>
       SizedBox(
         width: width,
@@ -1231,9 +1153,6 @@ class _Header extends StatelessWidget {
                       SizedBox(
                         width: 210,
                         child: DropdownButtonFormField<Genre?>(
-                          // Keyed to the value: the field takes initialValue
-                          // and is otherwise uncontrolled, so without this it
-                          // can show a genre the query no longer uses.
                           key: ValueKey(genre?.id),
                           initialValue: genre,
                           isExpanded: true,
@@ -1300,9 +1219,7 @@ class _Header extends StatelessWidget {
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
-                          // Only descending popularity keys: ascending plays
-                          // and downloads are unstable between requests,
-                          // because thousands of tracks tie at zero.
+
                           items: const [
                             DropdownMenuItem(
                               value: '-publish_date',
@@ -1371,7 +1288,6 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// Bulk actions over the results, shown only when there are some.
 class _ActionBar extends StatelessWidget {
   const _ActionBar({
     required this.pageCount,
@@ -1388,16 +1304,12 @@ class _ActionBar extends StatelessWidget {
     required this.compact,
   });
 
-  /// Tracks on the current page.
   final int pageCount;
 
-  /// Total matching the filter across all pages, capped at the API window.
   final int totalCount;
 
-  /// Whether [totalCount] hit the 10,000-row window and there may be more.
   final bool capped;
 
-  /// Whether the client-side exclusive filter is narrowing results.
   final bool exclusiveActive;
 
   final int selectedCount;
@@ -1408,8 +1320,6 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback onQueueBeyond;
   final VoidCallback onClearSelection;
 
-  /// Compact (phone) layout hides the wide "Download all" button and moves it
-  /// into the overflow menu, so the bar is just the count and the menu.
   final bool compact;
 
   String get _allLabel {
@@ -1455,9 +1365,6 @@ class _ActionBar extends StatelessWidget {
 
     final hasSelection = selectedCount > 0;
 
-    // On a phone the download-all / page / beyond actions live in the top bar's
-    // menu, and the track count is already shown by the pager, so this bar only
-    // appears when tracks are selected.
     if (compact && !hasSelection) return const SizedBox.shrink();
 
     return Padding(
@@ -1484,15 +1391,12 @@ class _ActionBar extends StatelessWidget {
               label: Text('Download $selectedCount'),
             )
           else
-            // Primary action is the whole result set, not just the page - that
-            // is what "download this genre" means.
             FilledButton.icon(
               onPressed: onDownloadAllMatching,
               icon: const Icon(Icons.download, size: 18),
               label: Text(_allLabel),
             ),
-          // The overflow stays on desktop; on a phone the same options live in
-          // the top bar, so a selection bar needs no menu of its own.
+
           if (!compact)
             PopupMenuButton<String>(
               tooltip: 'More download options',

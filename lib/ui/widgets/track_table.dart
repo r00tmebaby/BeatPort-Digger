@@ -1,4 +1,3 @@
-/// Shared track list, laid out as a table on wide screens and cards on narrow.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,16 +8,10 @@ import '../../state/downloads.dart';
 import '../../state/player.dart';
 import 'camelot.dart';
 
-/// A column the table can be ordered by.
 enum TrackSort { none, artists, title, label, genre, bpm, key, length }
 
-/// How a row's play button should look.
 enum PlaybackState { idle, loading, playing, paused }
 
-/// Row tint for a download state, or null when the row should stay plain.
-///
-/// Tints are kept low-opacity so a long list still reads as a table rather than
-/// a block of colour, and each hue is distinct in both light and dark themes.
 Color? statusColor(
   JobStatus? status,
   ColorScheme scheme,
@@ -36,7 +29,6 @@ Color? statusColor(
   return base.withValues(alpha: alpha);
 }
 
-/// Plain-language label for a download state.
 String statusLabel(JobStatus status) => switch (status) {
   JobStatus.queued => 'Queued',
   JobStatus.running => 'Downloading',
@@ -45,7 +37,6 @@ String statusLabel(JobStatus status) => switch (status) {
   JobStatus.cancelled => 'Cancelled',
 };
 
-/// The flags a track carries, as compact chips.
 class TrackBadges extends StatelessWidget {
   const TrackBadges({super.key, required this.track});
 
@@ -101,14 +92,12 @@ class TrackBadges extends StatelessWidget {
   }
 }
 
-/// Maps the player's state onto one track's button.
 PlaybackState playbackStateFor(PreviewPlayer player, Track track) {
   if (!player.isCurrent(track)) return PlaybackState.idle;
   if (player.loading) return PlaybackState.loading;
   return player.playing ? PlaybackState.playing : PlaybackState.paused;
 }
 
-/// Starts, pauses or resumes a preview of one track.
 class _PlayButton extends StatelessWidget {
   const _PlayButton({
     required this.track,
@@ -155,14 +144,12 @@ class _PlayButton extends StatelessWidget {
   }
 }
 
-/// Seconds from a "m:ss" or "h:mm:ss" duration, for ordering.
 int _lengthSeconds(String? value) {
   if (value == null || value.isEmpty) return -1;
   final parts = value.split(':').map((p) => int.tryParse(p.trim()) ?? 0);
   return parts.fold(0, (total, part) => total * 60 + part);
 }
 
-/// Camelot codes sort round the wheel, not as text: 10A must follow 9A.
 int _keyRank(Track track) {
   final number = track.key?.camelotNumber;
   final letter = track.key?.camelotLetter;
@@ -170,7 +157,6 @@ int _keyRank(Track track) {
   return number * 2 + (letter.toUpperCase() == 'A' ? 0 : 1);
 }
 
-/// Orders tracks by a column, keeping missing values last either way.
 List<Track> sortTracks(List<Track> tracks, TrackSort sort, bool ascending) {
   if (sort == TrackSort.none) return tracks;
 
@@ -221,36 +207,23 @@ class TrackTable extends StatefulWidget {
   final List<Track> tracks;
   final void Function(Track)? onTap;
 
-  /// Queues a track. Omitted where downloading does not apply.
   final void Function(Track)? onDownload;
 
-  /// Current state of a track's download, if it has one.
   final JobStatus? Function(Track)? statusFor;
 
-  /// Selected track ids. Selection is disabled when null.
   final Set<int>? selected;
   final void Function(Set<int>)? onSelectionChanged;
 
-  /// Starts or pauses a preview. Omitted where playback does not apply.
   final void Function(Track)? onPlay;
 
-  /// Playback state of a track, for the row's play button.
   final PlaybackState Function(Track)? playingState;
 
-  /// Tint rows by download state.
   final bool colourByStatus;
 
-  /// Popularity rank of a track, captured from the order the API returned.
-  ///
-  /// Beatport sorts by plays and downloads but does not serve the counts, so
-  /// position in the sorted result is the only measure available.
   final int? Function(Track)? rankFor;
 
-  /// Column heading for [rankFor], e.g. "Plays".
   final String? rankLabel;
 
-  /// Whether a track was downloaded in a past run, for a subtle marker on rows
-  /// that have no live job.
   final HistoryMark Function(Track)? historyMarkFor;
 
   @override
@@ -307,7 +280,6 @@ class _TrackTableState extends State<TrackTable> {
   }
 }
 
-/// The per-row download control, reflecting the job's state.
 class _DownloadButton extends StatelessWidget {
   const _DownloadButton({
     required this.track,
@@ -327,8 +299,6 @@ class _DownloadButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final status = statusFor?.call(track);
 
-    // No live job this session, but downloaded before: show that instead of a
-    // plain download button, so a resumed batch shows what is already done.
     if (status == null && historyMark != HistoryMark.none) {
       final missing = historyMark == HistoryMark.missing;
       return IconButton(
@@ -388,7 +358,6 @@ class _DownloadButton extends StatelessWidget {
   }
 }
 
-/// A clickable column heading showing the current sort direction.
 class _SortableHeader extends StatelessWidget {
   const _SortableHeader({
     required this.label,
@@ -401,7 +370,6 @@ class _SortableHeader extends StatelessWidget {
   final TrackSort column;
   final _TrackTableState state;
 
-  /// Centre the label, to line up over centred numeric/chip columns.
   final bool center;
 
   @override
@@ -444,8 +412,6 @@ class _WideTable extends StatelessWidget {
         selectable && ids.any((id) => widget.selected!.contains(id));
 
     final header = Material(
-      // A Material with elevation so the pinned header casts a shadow over the
-      // rows scrolling beneath it.
       elevation: 2,
       color: theme.colorScheme.surfaceContainerHighest,
       child: Padding(
@@ -550,8 +516,7 @@ class _WideTable extends StatelessWidget {
         final checked =
             selectable && id != null && widget.selected!.contains(id);
         final status = widget.statusFor?.call(track);
-        // Selection wins over the status tint: it is the state the user is
-        // actively manipulating and must stay legible.
+
         final tint = checked
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
             : widget.colourByStatus
@@ -678,7 +643,6 @@ class _WideTable extends StatelessWidget {
       },
     );
 
-    // Header pinned, rows scroll beneath it.
     return Column(
       children: [
         header,

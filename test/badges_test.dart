@@ -25,8 +25,6 @@ void main() {
     });
 
     test('defaults to false when a flag is absent or null', () {
-      // The live schema omits fields rather than sending false, so a missing
-      // flag must not read as set.
       final track = fromJson({'is_hype': null});
       expect(track.isHype, isFalse);
       expect(track.isExclusive, isFalse);
@@ -44,7 +42,6 @@ void main() {
     });
 
     test('exclusive comes from the exclusive key, not is_exclusive', () {
-      // The API names this one without the is_ prefix, unlike its neighbours.
       expect(fromJson({'exclusive': true}).isExclusive, isTrue);
       expect(fromJson({'is_exclusive': true}).isExclusive, isFalse);
     });

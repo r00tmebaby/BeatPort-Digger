@@ -1,7 +1,3 @@
-/// Camelot wheel and harmonic crate building.
-///
-/// Picking a key shows the codes that mix with it, and pulls tracks in those
-/// keys so a set can be assembled from compatible material.
 library;
 
 import 'package:flutter/material.dart';
@@ -15,12 +11,6 @@ import '../state/session.dart';
 import 'widgets/camelot.dart';
 import 'widgets/track_table.dart';
 
-/// A readable key name per Camelot code, for display only.
-///
-/// Filtering does not use these. The catalog stores enharmonic spellings as
-/// separate keys, so a code can mean two different key ids and matching on one
-/// name would miss every track filed under the other. The ids come from
-/// [Catalog.keyIdsByCamelot] instead.
 const Map<String, String> camelotToKeyName = {
   '1A': 'Ab Minor',
   '1B': 'B Major',
@@ -48,7 +38,6 @@ const Map<String, String> camelotToKeyName = {
   '12B': 'E Major',
 };
 
-/// Camelot codes that mix harmonically with [code]: same key, +/-1, relative.
 List<String> harmonicNeighbours(String code) {
   final match = RegExp(r'^(\d{1,2})([AB])$').firstMatch(code.toUpperCase());
   if (match == null) return const [];
@@ -94,8 +83,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
     });
 
     try {
-      // Every id behind each compatible code, both enharmonic spellings
-      // included.
       final grouped = await session.catalog.keyIdsByCamelot();
       final ids = <int>[
         for (final code in harmonicNeighbours(_selected)) ...?grouped[code],
@@ -143,9 +130,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
     final neighbours = harmonicNeighbours(_selected);
     final narrow = MediaQuery.sizeOf(context).width < 600;
 
-    // Laid out like Browse: every control sits at the top and the results take
-    // the rest of the window. On a phone the wheel and filters move into a
-    // bottom sheet behind a compact key bar, so the list keeps the screen.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -237,7 +221,7 @@ class _HarmonicPageState extends State<HarmonicPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // The wheel is the key picker; compatible keys are highlighted.
+
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -278,8 +262,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
                       onDownload: queue.enqueue,
                       statusFor: (track) => queue.jobFor(track)?.status,
                       onPlay: (track) {
-                        // Autoplay steps through the compatible tracks on
-                        // screen once this one finishes.
                         player.setUpNext(_results);
                         player.toggle(track);
                       },
@@ -308,8 +290,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
     );
   }
 
-  /// Phone layout: a single bar showing the chosen key and opening the wheel
-  /// and filters in a bottom sheet, plus a Find action.
   Widget _phoneBar(Session session, ThemeData theme) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
     child: Row(
@@ -337,7 +317,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
     ),
   );
 
-  /// The Camelot wheel and filters in a bottom sheet, the phone's key picker.
   Future<void> _openKeyPicker(Session session) {
     return showModalBottomSheet<void>(
       context: context,
@@ -392,7 +371,7 @@ class _HarmonicPageState extends State<HarmonicPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      // The wheel is the key picker; compatible keys highlight.
+
                       Center(
                         child: Wrap(
                           spacing: 6,
@@ -473,7 +452,6 @@ class _HarmonicPageState extends State<HarmonicPage> {
     );
   }
 
-  /// A compact summary of the crate, so it does not consume list space.
   Widget _crateBar(ThemeData theme) => Material(
     color: theme.colorScheme.secondaryContainer,
     child: Padding(
@@ -568,9 +546,6 @@ class _KeyButton extends StatelessWidget {
         camelotColor(number, letter, theme.brightness) ??
         theme.colorScheme.surfaceContainerHighest;
 
-    // Keys that are neither selected nor compatible are muted rather than
-    // recoloured, so the wheel still reads as a wheel while the four usable
-    // keys stand out.
     final background = (selected || compatible)
         ? wheel
         : Color.alphaBlend(

@@ -1,4 +1,3 @@
-/// Queues everything behind a pasted Beatport URL.
 library;
 
 import 'package:flutter/material.dart';

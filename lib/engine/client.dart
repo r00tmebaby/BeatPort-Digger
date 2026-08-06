@@ -1,4 +1,3 @@
-/// HTTP transport for the Beatport v4 catalog API.
 library;
 
 import 'dart:convert';
@@ -29,7 +28,7 @@ class BeatportClient {
       uri,
       headers: {
         ...defaultHeaders,
-        'Authorization': '${token.tokenType} ${token.accessToken}',
+        'Authorization': 'Bearer ${token.accessToken}',
       },
     );
   }
@@ -49,8 +48,7 @@ class BeatportClient {
     await auth.check();
     var response = await _send(path, cleaned);
 
-    // One retry: a token can be rejected before its recorded expiry.
-    if (response.statusCode == 401) {
+    if (response.statusCode == 401 || response.statusCode == 403) {
       if (!await auth.refresh()) {
         throw AuthException(401, 'session expired, log in again');
       }

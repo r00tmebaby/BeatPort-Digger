@@ -35,8 +35,6 @@ void main() {
     });
 
     test('separates a store chart from a library playlist', () {
-      // /playlist/ is a curated chart; /playlists/ is a user's own list. They
-      // are different endpoints, so conflating them fetches the wrong thing.
       expect(
         parseBeatportLink('https://www.beatport.com/playlist/x/5').type,
         LinkType.chart,
@@ -71,8 +69,6 @@ void main() {
     });
 
     test('rejects a path with no id instead of crashing', () {
-      // Indexing the id segment before checking the length would throw on
-      // these.
       for (final url in [
         'https://www.beatport.com/library',
         'https://www.beatport.com/track',

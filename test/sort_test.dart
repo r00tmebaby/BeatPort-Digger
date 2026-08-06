@@ -39,7 +39,6 @@ void main() {
     });
 
     test('orders keys round the wheel, not as text', () {
-      // Sorted as strings, "10A" would land before "9A".
       final tracks = [
         track(name: 'ten', camelotNumber: 10, camelotLetter: 'A'),
         track(name: 'nine', camelotNumber: 9, camelotLetter: 'A'),
@@ -53,7 +52,6 @@ void main() {
     });
 
     test('orders lengths by duration, not lexically', () {
-      // "10:00" sorts before "9:00" as text.
       final tracks = [
         track(name: 'long', length: '10:00'),
         track(name: 'short', length: '9:00'),
@@ -77,8 +75,7 @@ void main() {
 
     test('keeps tracks with no value out of the way', () {
       final tracks = [track(name: 'none'), track(name: 'has', bpm: 100)];
-      // Missing sorts lowest ascending, so it does not displace real values at
-      // the top of a descending sort either.
+
       expect(sortTracks(tracks, TrackSort.bpm, true).first.name, 'none');
       expect(sortTracks(tracks, TrackSort.bpm, false).first.name, 'has');
     });

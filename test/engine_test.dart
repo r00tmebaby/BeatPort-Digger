@@ -8,8 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('computeLoginId', () {
     test('matches the published FNV-1a 64 vectors', () {
-      // Verified against the published FNV-1a 64-bit vectors, so the login_id
-      // stays stable across runs and platforms.
       expect(computeLoginId('', '').length, 16);
       expect(computeLoginId('a', 'b'), 'e661911904a01160');
     });
@@ -30,8 +28,6 @@ void main() {
     });
 
     test('rejects keys the API answers with a silent empty result', () {
-      // id, isrc and new_release_date return count=0 rather than an error,
-      // which would look like a filter that matched nothing.
       for (final key in ['id', '-id', 'isrc', 'new_release_date']) {
         expect(() => validateOrderBy(key), throwsArgumentError);
       }
@@ -58,8 +54,6 @@ void main() {
 
   group('TrackQuery', () {
     test('filters on new_release_date, never publish_date', () {
-      // The API accepts a publish_date range and then ignores it, silently
-      // returning the unfiltered catalog.
       final query = TrackQuery(
         genreId: [89],
       ).dated(DateTime(2026, 1, 1), DateTime(2026, 6, 30));
@@ -90,8 +84,6 @@ void main() {
 
   group('sessionIdFrom', () {
     test('reads the cookie out of a folded Set-Cookie header', () {
-      // Dart joins repeated Set-Cookie headers with commas, and expiry dates
-      // contain commas too, so splitting on them would corrupt the value.
       const header =
           'csrftoken=abc; expires=Fri, 01 Jan 2027 00:00:00 GMT; Path=/, '
           'sessionid=s3cr3tvalue; expires=Sat, 02 Jan 2027 00:00:00 GMT; Path=/';
@@ -152,8 +144,6 @@ void main() {
 
   group('models', () {
     test('reads a label out of the release object', () {
-      // The generated schema types release as a URI string, but the live API
-      // returns an object.
       final track = Track.fromJson({
         'id': 1,
         'name': 'Glue',

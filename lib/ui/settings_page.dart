@@ -1,4 +1,3 @@
-/// Download preferences.
 library;
 
 import 'dart:io';
@@ -9,8 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../engine/download.dart';
 import '../engine/ffmpeg.dart';
-// Aliased: the catalog's Key is a musical key and would collide with the
-// widget Key from material.dart.
+
 import '../engine/models.dart' as models;
 import '../engine/naming.dart';
 import '../state/downloads.dart';
@@ -150,9 +148,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       style: theme.textTheme.bodyMedium,
                     ),
                   ),
-                  // Choosing a folder needs a desktop directory picker; on
-                  // Android and iOS there is none, so downloads always go to the
-                  // app's own storage and the button would do nothing.
+
                   if (!Platform.isAndroid && !Platform.isIOS) ...[
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
@@ -233,7 +229,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// A representative track, so the path preview shows real substitutions.
 const models.Track _sampleTrack = models.Track(
   id: 12345678,
   name: 'Strobe',
@@ -248,7 +243,6 @@ const models.Track _sampleTrack = models.Track(
   labelName: 'mau5trap',
 );
 
-/// Folder and file name layout, with a preview of the result.
 class _OrganisationSetting extends StatefulWidget {
   const _OrganisationSetting({required this.queue});
 
@@ -288,8 +282,7 @@ class _OrganisationSettingState extends State<_OrganisationSetting> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final queue = widget.queue;
-    // A preset the current template matches, so the dropdown reflects reality
-    // after a custom edit rather than showing a stale selection.
+
     final matching = folderPresets.entries
         .where((entry) => entry.value == _folder.text)
         .map((entry) => entry.key)
@@ -376,8 +369,6 @@ class _OrganisationSettingState extends State<_OrganisationSetting> {
                   label: Text('{${entry.key}}'),
                   visualDensity: VisualDensity.compact,
                   onPressed: () {
-                    // Append to the folder template, the field most often
-                    // being adjusted.
                     setState(() {
                       final base = _folder.text;
                       _folder.text = base.isEmpty
@@ -403,7 +394,6 @@ class _OrganisationSettingState extends State<_OrganisationSetting> {
   }
 }
 
-/// Preview length and the cache it fills.
 class _PreviewSetting extends StatefulWidget {
   @override
   State<_PreviewSetting> createState() => _PreviewSettingState();
@@ -441,7 +431,7 @@ class _PreviewSettingState extends State<_PreviewSetting> {
               labelText: 'Preview length',
               border: OutlineInputBorder(),
             ),
-            // Segments are roughly five seconds each.
+
             items: const [
               DropdownMenuItem(value: 0, child: Text('Whole track')),
               DropdownMenuItem(value: 6, child: Text('About 30 seconds')),
@@ -493,7 +483,6 @@ class _PreviewSettingState extends State<_PreviewSetting> {
   }
 }
 
-/// Download history summary and cleanup.
 class _HistorySetting extends StatelessWidget {
   const _HistorySetting({required this.queue});
 
@@ -570,7 +559,6 @@ class _HistorySetting extends StatelessWidget {
   }
 }
 
-/// One entry in the status colour legend.
 class _StatusSwatch extends StatelessWidget {
   const _StatusSwatch({required this.status});
 
@@ -621,7 +609,6 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// ffmpeg status, with the option to fetch a verified build.
 class _FfmpegSetting extends StatelessWidget {
   const _FfmpegSetting();
 

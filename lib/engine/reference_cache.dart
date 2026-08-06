@@ -1,9 +1,3 @@
-/// On-disk cache of the small, near-static reference data.
-///
-/// Genres, their sub-genres and the key list change rarely but are needed on
-/// every screen. Persisting them lets the app populate its filters instantly on
-/// launch and refresh in the background, rather than blocking startup on the
-/// network.
 library;
 
 import 'dart:async';
@@ -15,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import 'catalog.dart';
 import 'models.dart';
 
-/// A snapshot of reference data plus when it was written.
 class ReferenceData {
   const ReferenceData({
     required this.genres,
@@ -26,7 +19,6 @@ class ReferenceData {
 
   final List<Genre> genres;
 
-  /// Sub-genres by parent genre id.
   final Map<int, List<Named>> subGenres;
   final List<Key> keys;
   final DateTime? fetchedAt;
@@ -86,7 +78,6 @@ class ReferenceData {
   }
 }
 
-/// Reads and writes [ReferenceData], and refreshes it from the catalog.
 class ReferenceCache {
   ReferenceCache(this.catalog);
 
@@ -97,10 +88,6 @@ class ReferenceCache {
     return File('${support.path}${Platform.pathSeparator}reference.json');
   }
 
-  /// Loads the cached snapshot, or an empty one when nothing is stored.
-  ///
-  /// Never throws: a missing or corrupt cache is treated as empty so startup
-  /// falls through to a live fetch.
   Future<ReferenceData> load() async {
     try {
       final file = await _file();
@@ -113,10 +100,6 @@ class ReferenceCache {
     }
   }
 
-  /// Fetches fresh reference data from the catalog and writes it to disk.
-  ///
-  /// Sub-genres are fetched per genre, so this is several requests; it is meant
-  /// to run in the background, not block a screen.
   Future<ReferenceData> refresh({DateTime? now}) async {
     final genres = await catalog.genres();
     final keys = await catalog.allKeys();
@@ -127,10 +110,7 @@ class ReferenceCache {
       if (id == null) continue;
       try {
         subs[id] = await catalog.subGenres(id);
-      } on Object {
-        // A genre with no sub-genres, or a transient failure, just leaves that
-        // entry absent rather than failing the whole refresh.
-      }
+      } on Object {}
     }
 
     final data = ReferenceData(
@@ -148,9 +128,7 @@ class ReferenceCache {
       final file = await _file();
       await file.parent.create(recursive: true);
       await file.writeAsString(jsonEncode(data.toJson()));
-    } on Object {
-      // Losing the cache is not fatal; it will be rebuilt next launch.
-    }
+    } on Object {}
   }
 
   static const ReferenceData _empty = ReferenceData(

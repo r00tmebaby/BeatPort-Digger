@@ -1,7 +1,3 @@
-/// Navigation shell.
-///
-/// A rail on wide windows and a bottom bar on narrow ones, so the same build
-/// serves desktop and phone.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,8 +19,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _index = 0;
 
-  /// Which finder the Browse destination shows. Lifted here so its selector can
-  /// live in the header rather than in a tab row that would eat list space.
   int _browseTab = 0;
 
   static const _destinations = [
@@ -39,8 +33,6 @@ class _HomePageState extends State<HomePage> {
     (icon: Icons.link, label: 'Link'),
   ];
 
-  /// IndexedStack keeps every page alive, so search results, filters and scroll
-  /// position survive a trip to Downloads and back.
   Widget _page() => IndexedStack(
     index: _index,
     children: [
@@ -75,8 +67,6 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
-          // The finder selector sits here on the Browse destination, so it does
-          // not need a tab row of its own beneath the header.
           if (_index == 0)
             for (var i = 0; i < _browseTabs.length; i++)
               Padding(
@@ -85,8 +75,7 @@ class _HomePageState extends State<HomePage> {
                   tooltip: _browseTabs[i].label,
                   onPressed: () => setState(() => _browseTab = i),
                   icon: Icon(_browseTabs[i].icon),
-                  // The selected finder gets a green pill behind its icon, so
-                  // the current tab is obvious at a glance.
+
                   style: _browseTab == i
                       ? IconButton.styleFrom(
                           backgroundColor: theme.colorScheme.primary.withValues(
@@ -102,7 +91,7 @@ class _HomePageState extends State<HomePage> {
           const _AccountMenu(),
         ],
       ),
-      // The transport sits above the nav bar so it stays put while pages change.
+
       bottomSheet: const NowPlayingBar(),
       body: wide
           ? Row(

@@ -1,4 +1,3 @@
-/// The download queue shared by every screen.
 library;
 
 import 'dart:async';
@@ -28,8 +27,13 @@ class DownloadJob {
   String? path;
   String? error;
 
-  /// False when the file was left as MPEG-TS because ffmpeg was unavailable.
   bool remuxed = true;
+
+  bool isSample = false;
+
+  /// Why a sample was written instead of the full track, e.g. because the
+  /// account has no active subscription. Null unless [isSample] is true.
+  String? sampleReason;
 
   bool get isFinished =>
       status == JobStatus.completed ||
@@ -37,16 +41,11 @@ class DownloadJob {
       status == JobStatus.cancelled;
 }
 
-/// Runs downloads a few at a time and reports their state to the UI.
 class DownloadQueue extends ChangeNotifier {
   DownloadQueue({int maxConcurrent = 4}) : _maxConcurrent = maxConcurrent;
 
   int _maxConcurrent;
 
-  /// How many tracks download at once.
-  ///
-  /// Four is the starting point because each track also fetches its segments in
-  /// parallel, so the open connection count is the product of the two.
   int get maxConcurrent => _maxConcurrent;
 
   set maxConcurrent(int value) {
@@ -55,15 +54,12 @@ class DownloadQueue extends ChangeNotifier {
     _maxConcurrent = clamped;
     _notify();
     unawaited(saveSettings());
-    // Raising the limit should start queued work straight away.
+
     unawaited(_pump());
   }
 
   final Ffmpeg ffmpeg = Ffmpeg();
 
-  /// Quality requested for new downloads. Lossless by default: it is what the
-  /// download endpoint serves when the account allows it, and costs nothing
-  /// extra to ask for.
   AudioQuality quality = AudioQuality.lossless;
 
   set preferredQuality(AudioQuality value) {
@@ -78,8 +74,6 @@ class DownloadQueue extends ChangeNotifier {
   int _running = 0;
   bool _disposed = false;
 
-  /// A download in flight outlives the queue on sign-out or shutdown, and
-  /// ChangeNotifier throws if notified after disposal.
   void _notify() {
     if (_disposed) return;
     notifyListeners();
@@ -87,12 +81,10 @@ class DownloadQueue extends ChangeNotifier {
 
   final List<DownloadJob> _jobs = [];
 
-  /// Jobs by track id, kept in step with [_jobs] for O(1) lookup.
   final Map<int, DownloadJob> _byId = {};
 
   List<DownloadJob> get jobs => List.unmodifiable(_jobs);
 
-  // Persistent history of past downloads, by track id.
   final Map<int, HistoryEntry> _history = {};
   Timer? _historyFlush;
 
@@ -103,7 +95,6 @@ class DownloadQueue extends ChangeNotifier {
   int get historyCount => _history.length;
   int get missingCount => _history.values.where((e) => !e.present).length;
 
-  /// How a track stands relative to past downloads, for the results list.
   HistoryMark historyMark(Track track) {
     final id = track.id;
     if (id == null) return HistoryMark.none;
@@ -114,7 +105,7 @@ class DownloadQueue extends ChangeNotifier {
 
   HistoryEntry? historyEntry(int trackId) => _history[trackId];
 
-  void _recordHistory(Track track, String path) {
+  void _recordHistory(Track track, String path, String qualityLabel) {
     final id = track.id;
     if (id == null) return;
     _history[id] = HistoryEntry(
@@ -122,21 +113,18 @@ class DownloadQueue extends ChangeNotifier {
       title: track.title,
       artists: track.artistNames,
       path: path,
-      quality: quality.label,
+      quality: qualityLabel,
       completedAt: _now(),
       present: true,
     );
     _scheduleHistorySave();
   }
 
-  /// Passed timestamps come from the caller; Date.now is unavailable in some
-  /// contexts, but the queue runs on the UI isolate where it is fine.
   DateTime _now() => DateTime.now();
 
   bool get isBusy => _jobs.any((job) => !job.isFinished);
   int get activeCount => _jobs.where((job) => !job.isFinished).length;
 
-  // ffmpeg install state, surfaced so the UI can offer to fetch it.
   bool _ffmpegReady = false;
   bool _ffmpegChecked = false;
   bool installing = false;
@@ -147,14 +135,12 @@ class DownloadQueue extends ChangeNotifier {
   bool get ffmpegChecked => _ffmpegChecked;
   bool get canInstallFfmpeg => ffmpeg.canInstall;
 
-  /// Binds the queue to the signed-in session's catalog.
   void bind(Catalog catalog) {
     if (_downloader?.catalog == catalog) return;
     _downloader?.close();
     _downloader = Downloader(catalog: catalog, ffmpeg: ffmpeg);
   }
 
-  /// Checks for ffmpeg once, so the UI can prompt before anything is queued.
   Future<void> checkFfmpeg() async {
     if (_ffmpegChecked) return;
     _ffmpegReady = await ffmpeg.resolve() != null;
@@ -162,7 +148,6 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
-  /// Downloads and installs the pinned ffmpeg build.
   Future<bool> installFfmpeg() async {
     if (installing) return false;
     installing = true;
@@ -189,10 +174,8 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
-  /// An explicit download folder, or null to use the default location.
   String? destinationOverride;
 
-  /// Tint track rows by download state.
   bool colourByStatus = true;
 
   set statusColours(bool value) {
@@ -202,10 +185,8 @@ class DownloadQueue extends ChangeNotifier {
     unawaited(saveSettings());
   }
 
-  /// Sub-folder layout beneath the download folder. Empty means flat.
   String folderTemplate = '';
 
-  /// File name layout, without the extension.
   String fileTemplate = defaultFileTemplate;
 
   set folders(String value) {
@@ -223,10 +204,8 @@ class DownloadQueue extends ChangeNotifier {
     unawaited(saveSettings());
   }
 
-  /// The folder downloads are written to, as text, for display.
   Future<String> destinationPath() async => (await destination()).path;
 
-  /// Where finished files are written.
   Future<Directory> destination() async {
     final override = destinationOverride;
     if (override != null && override.isNotEmpty) return Directory(override);
@@ -246,8 +225,6 @@ class DownloadQueue extends ChangeNotifier {
     await saveSettings();
   }
 
-  // -- persistence ------------------------------------------------------
-
   Future<File> _settingsFile() async {
     final support = await getApplicationSupportDirectory();
     return File(
@@ -255,7 +232,6 @@ class DownloadQueue extends ChangeNotifier {
     );
   }
 
-  /// Restores saved preferences. Failures are ignored: defaults are usable.
   Future<void> loadSettings() async {
     try {
       final file = await _settingsFile();
@@ -281,9 +257,7 @@ class DownloadQueue extends ChangeNotifier {
       if (colours is bool) colourByStatus = colours;
 
       _notify();
-    } on Object {
-      // A corrupt or unreadable settings file should not stop the app.
-    }
+    } on Object {}
   }
 
   Future<void> saveSettings() async {
@@ -300,12 +274,8 @@ class DownloadQueue extends ChangeNotifier {
           if (destinationOverride != null) 'destination': destinationOverride,
         }),
       );
-    } on Object {
-      // Losing a preference is not worth surfacing an error for.
-    }
+    } on Object {}
   }
-
-  // -- history ----------------------------------------------------------
 
   Future<File> _historyFile() async {
     final support = await getApplicationSupportDirectory();
@@ -314,8 +284,6 @@ class DownloadQueue extends ChangeNotifier {
     );
   }
 
-  /// Loads past downloads, then checks in the background whether their files
-  /// still exist so the results list can flag any that were deleted.
   Future<void> loadHistory() async {
     try {
       final file = await _historyFile();
@@ -329,20 +297,16 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
       _notify();
-    } on Object {
-      // A corrupt history is not fatal; start empty.
-    }
+    } on Object {}
     unawaited(verifyHistory());
   }
 
-  /// Marks entries whose file is no longer on disk, without dropping them.
   Future<void> verifyHistory() async {
     if (_history.isEmpty) return;
     var changed = false;
     for (final entry in _history.values.toList()) {
       final present = await File(entry.path).exists();
-      // Re-check membership after the await: the entry may have been cleared
-      // while the disk check was in flight, and reassigning would resurrect it.
+
       if (!_history.containsKey(entry.trackId)) continue;
       if (present != entry.present) {
         _history[entry.trackId] = entry.copyWith(present: present);
@@ -355,7 +319,6 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
-  /// Drops entries whose file is gone.
   Future<void> removeMissingHistory() async {
     _history.removeWhere((_, entry) => !entry.present);
     _notify();
@@ -368,8 +331,6 @@ class DownloadQueue extends ChangeNotifier {
     await _saveHistory();
   }
 
-  /// Batches writes: a large batch completing would otherwise rewrite the whole
-  /// file per track.
   void _scheduleHistorySave() {
     _historyFlush?.cancel();
     _historyFlush = Timer(const Duration(milliseconds: 500), _saveHistory);
@@ -384,30 +345,20 @@ class DownloadQueue extends ChangeNotifier {
       await file.writeAsString(
         jsonEncode([for (final e in _history.values) e.toJson()]),
       );
-    } on Object {
-      // Losing history is not worth surfacing an error for.
-    }
+    } on Object {}
   }
 
-  /// The job for a track, if it has been queued this session.
-  ///
-  /// Indexed rather than scanned: the track list asks this for every visible
-  /// row on every rebuild, so a linear search here is quadratic on screen.
   DownloadJob? jobFor(Track track) {
     final id = track.id;
     return id == null ? null : _byId[id];
   }
 
-  /// Adds one track without notifying, so a bulk add can notify once.
-  ///
-  /// Returns whether a job was actually created.
   bool _add(Track track) {
     final id = track.id;
     if (id == null) return false;
 
     final existing = _byId[id];
-    // A failed or cancelled job may be retried; a live one is not re-queued,
-    // which would write the same file twice concurrently.
+
     if (existing != null && !_isRetryable(existing)) return false;
     if (existing != null) _jobs.remove(existing);
 
@@ -417,7 +368,6 @@ class DownloadQueue extends ChangeNotifier {
     return true;
   }
 
-  /// Queues a track, ignoring one already queued or downloaded.
   void enqueue(Track track) {
     if (!_add(track)) return;
     _notify();
@@ -427,10 +377,6 @@ class DownloadQueue extends ChangeNotifier {
   bool _isRetryable(DownloadJob job) =>
       job.status == JobStatus.failed || job.status == JobStatus.cancelled;
 
-  /// Queues many tracks at once, returning how many were actually added.
-  ///
-  /// Notifies once at the end. Notifying per track rebuilt the whole list for
-  /// every addition, which froze the UI on a select-all of any size.
   int enqueueAll(Iterable<Track> tracks) {
     var added = 0;
     for (final track in tracks) {
@@ -443,7 +389,6 @@ class DownloadQueue extends ChangeNotifier {
     return added;
   }
 
-  // Streaming discovery, for queueing everything behind a filter or a link.
   bool discovering = false;
   int discovered = 0;
   String? discoverLabel;
@@ -457,11 +402,6 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
-  /// Queues every track from [source] as it is found.
-  ///
-  /// Enumerating a broad filter takes many requests, so tracks are queued as
-  /// they arrive rather than after the walk finishes: downloading starts
-  /// immediately and a cancel does not throw away what was already found.
   Future<int> enqueueStream(
     Stream<Track> source, {
     required String label,
@@ -483,8 +423,7 @@ class DownloadQueue extends ChangeNotifier {
           discovered += 1;
           sinceNotify += 1;
         }
-        // Rebuilding the list for every track found is what makes a broad walk
-        // crawl. Batch the notifications and start the queue moving.
+
         if (sinceNotify >= 25) {
           sinceNotify = 0;
           _notify();
@@ -521,10 +460,6 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
-  /// Cancels everything queued or running, and stops any discovery in flight.
-  ///
-  /// Discovery is stopped first: leaving it running would keep feeding new jobs
-  /// into a queue the user just asked to stop.
   void cancelAll() {
     _discovery?.cancel();
     for (final job in _jobs) {
@@ -535,7 +470,6 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
-  /// Cancels everything and empties the list.
   void clearAll() {
     cancelAll();
     _jobs.removeWhere((job) {
@@ -546,7 +480,6 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
-  /// Starts queued jobs up to the concurrency limit.
   Future<void> _pump() async {
     final downloader = _downloader;
     if (downloader == null) return;
@@ -585,10 +518,9 @@ class DownloadQueue extends ChangeNotifier {
       job.status = JobStatus.completed;
       job.path = result.path;
       job.remuxed = result.remuxed;
+      job.isSample = result.isSample;
+      job.sampleReason = result.sampleReason;
 
-      // On Android, move the file into the shared Music/BeatPort Digger folder so
-      // the Files app and other apps (DJ software) can see it. Playback then
-      // uses the public path returned; the private copy is removed.
       if (Platform.isAndroid) {
         final name = result.path.split(Platform.pathSeparator).last;
         final published = await MediaStore.publishAudio(
@@ -601,7 +533,13 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
 
-      _recordHistory(job.track, job.path!);
+      _recordHistory(
+        job.track,
+        job.path!,
+        result.isSample
+            ? 'Sample MP3 (${result.sampleReason ?? 'full track unavailable'})'
+            : quality.label,
+      );
     } on DownloadCancelled {
       job.status = JobStatus.cancelled;
     } on Object catch (exception) {
@@ -617,7 +555,7 @@ class DownloadQueue extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    // Flush any batched history write before going away.
+
     if (_historyFlush?.isActive ?? false) unawaited(_saveHistory());
     _historyFlush?.cancel();
     for (final job in _jobs) {

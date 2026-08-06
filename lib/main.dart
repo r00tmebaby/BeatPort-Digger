@@ -11,7 +11,7 @@ import 'ui/login_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Loads the native audio libraries preview playback needs.
+
   MediaKit.ensureInitialized();
   runApp(const BeatPortDiggerApp());
 }
@@ -24,8 +24,7 @@ class BeatPortDiggerApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => Session()..restore()),
-        // The queue outlives sign-in changes so in-flight downloads are not
-        // dropped; only its catalog is rebound.
+
         ChangeNotifierProxyProvider<Session, DownloadQueue>(
           create: (_) => DownloadQueue()
             ..loadSettings()

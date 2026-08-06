@@ -6,8 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('previewErrorMessage', () {
     test('a 404 reads as unavailable, not as a status code', () {
-      // Beatport serves a stream link for some tracks whose HLS asset 404s;
-      // that is accurate, not a crash, so it must not look like one.
       final message = previewErrorMessage(
         BeatportException(404, 'could not read the stream playlist'),
       );
@@ -15,10 +13,25 @@ void main() {
       expect(message, isNot(contains('404')));
     });
 
-    test('403 is treated the same as 404', () {
+    test('a 403 reads as a refusal, not as a missing asset', () {
+      final message = previewErrorMessage(BeatportException(403));
+      expect(message, 'Beatport refused this preview (403).');
+      expect(message, isNot(contains('No preview available')));
+    });
+
+    test('a 403 repeats the reason Beatport gave', () {
       expect(
-        previewErrorMessage(BeatportException(403)),
-        'No preview available for this track.',
+        previewErrorMessage(
+          BeatportException(403, 'Invalid subscription status.'),
+        ),
+        'Beatport refused this preview: Invalid subscription status.',
+      );
+    });
+
+    test('a 401 says to sign in rather than showing a status code', () {
+      expect(
+        previewErrorMessage(BeatportException(401)),
+        'Session expired. Sign in again.',
       );
     });
 
@@ -29,10 +42,10 @@ void main() {
       );
     });
 
-    test('an HLS parse failure reads as unavailable', () {
+    test('an HLS parse failure reads as a stream that could not be read', () {
       expect(
         previewErrorMessage(HlsException('playlist contains no segments')),
-        'No preview available for this track.',
+        'The preview stream could not be read.',
       );
     });
 

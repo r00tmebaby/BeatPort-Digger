@@ -6,8 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('TrackQuery.params', () {
     test('carries every filter at once', () {
-      // Filters combine as AND at the API, so all of them must survive into
-      // the request together. Dropping one silently widens the search.
       final params = TrackQuery(
         genreId: [108],
         subGenreId: [309],
@@ -39,7 +37,7 @@ void main() {
       expect(params['genre_id'], '108');
       expect(params['bpm'], isNull);
       expect(params['artist_name'], isNull);
-      // false must not be sent as a filter, or it would exclude everything.
+
       expect(params['is_hype'], isNull);
       expect(params['is_classic'], isNull);
       expect(params['is_explicit'], isNull);
@@ -67,8 +65,6 @@ void main() {
     });
 
     test('rejects sort keys the API answers with an empty page', () {
-      // These return count=0 rather than an error, which is indistinguishable
-      // from a filter that matched nothing.
       for (final key in ['popularity', 'trending', 'rank', 'sales', 'hype']) {
         expect(() => validateOrderBy(key), throwsArgumentError, reason: key);
       }

@@ -1,12 +1,5 @@
-/// A record of tracks downloaded in past runs.
-///
-/// The queue is in-memory, so without this a track downloaded yesterday looks
-/// untouched today. Persisting completions lets search results show what is
-/// already saved, which matters most when resuming a large batch across
-/// sessions.
 library;
 
-/// One finished download.
 class HistoryEntry {
   const HistoryEntry({
     required this.trackId,
@@ -25,8 +18,6 @@ class HistoryEntry {
   final String quality;
   final DateTime completedAt;
 
-  /// Whether the file was on disk at the last check. A missing file is kept
-  /// rather than dropped, so an unplugged drive does not erase the record.
   final bool present;
 
   HistoryEntry copyWith({bool? present}) => HistoryEntry(
@@ -65,14 +56,4 @@ class HistoryEntry {
   }
 }
 
-/// The state a track can be in relative to past downloads.
-enum HistoryMark {
-  /// Never downloaded.
-  none,
-
-  /// Downloaded before and the file is still on disk.
-  saved,
-
-  /// Downloaded before but the file is gone.
-  missing,
-}
+enum HistoryMark { none, saved, missing }

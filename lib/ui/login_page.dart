@@ -1,7 +1,3 @@
-/// Credential entry.
-///
-/// The password is used once to obtain a token and is never stored; only the
-/// resulting token pair is kept, in the platform keychain.
 library;
 
 import 'package:flutter/material.dart';

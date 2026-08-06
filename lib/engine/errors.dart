@@ -1,4 +1,3 @@
-/// Error types shared by the transport and authentication layers.
 library;
 
 import 'dart:convert';
@@ -14,15 +13,10 @@ class BeatportException implements Exception {
       'request failed with status $status${message.isEmpty ? '' : ' - $message'}';
 }
 
-/// Authentication could not be established.
 class AuthException extends BeatportException {
   AuthException(super.status, [super.message]);
 }
 
-/// Extracts a readable message from an error body.
-///
-/// Most failures return {"detail": ...} or {"error": ...}. Invalid filter
-/// values instead return field-keyed arrays, e.g. {"id": ["Enter a number."]}.
 String errorMessage(String body) {
   Object? payload;
   try {

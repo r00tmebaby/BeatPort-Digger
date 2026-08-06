@@ -7,7 +7,6 @@ import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 import 'package:pointycastle/block/aes.dart';
 import 'package:pointycastle/block/modes/cbc.dart';
 
-/// Encrypts with PKCS#7 padding, mirroring what the segment packager does.
 Uint8List encrypt(Uint8List plain, Uint8List key, Uint8List iv) {
   final padding = 16 - (plain.length % 16);
   final padded = Uint8List(plain.length + padding)
@@ -56,7 +55,6 @@ segment1.ts
     });
 
     test('resolves absolute and root-relative URIs against the playlist', () {
-      // Concatenating onto the playlist directory would corrupt both of these.
       final playlist = parseMediaPlaylist('''
 #EXTM3U
 #EXT-X-KEY:METHOD=AES-128,URI="https://keys.beatport.com/k/9",IV=0x00
@@ -81,8 +79,6 @@ segment1.ts
     });
 
     test('rejects an encryption method it cannot honour', () {
-      // SAMPLE-AES encrypts only parts of each packet. Treating it as AES-128
-      // would produce a file that looks complete and is unplayable.
       expect(
         () => parseMediaPlaylist(
           '#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="k"\n#EXTINF:6,\na.ts\n',
@@ -140,8 +136,6 @@ segment1.ts
     });
 
     test('recovers plaintext that is an exact multiple of the block size', () {
-      // A full block of padding is appended, so the ciphertext is one block
-      // longer than the plaintext.
       final plain = Uint8List.fromList(List.generate(32, (i) => i));
       final ciphertext = encrypt(plain, key, iv);
       expect(ciphertext, hasLength(48));
@@ -156,8 +150,6 @@ segment1.ts
     });
 
     test('rejects a segment whose padding byte is out of range', () {
-      // Slicing on this byte unchecked would either throw or silently truncate
-      // audio.
       final wrongKey = Uint8List(16);
       expect(
         () => decryptSegment(
@@ -171,8 +163,6 @@ segment1.ts
 
   group('stripPkcs7', () {
     test('removes the declared number of padding bytes', () {
-      // The final byte is the count, so three 3s strip themselves and leave the
-      // 3 that is real data.
       expect(stripPkcs7(Uint8List.fromList([1, 2, 3, 3, 3, 3])), [1, 2, 3]);
       expect(stripPkcs7(Uint8List.fromList([1, 2, 4, 4, 4, 4])), [1, 2]);
     });
@@ -199,7 +189,6 @@ segment1.ts
     });
 
     test('collapses whitespace and trims trailing dots', () {
-      // Windows creates "name." but cannot then open it.
       expect(sanitizeFileName('a   b'), 'a b');
       expect(sanitizeFileName('track...'), 'track');
       expect(sanitizeFileName('  spaced  '), 'spaced');

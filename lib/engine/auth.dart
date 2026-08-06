@@ -1,9 +1,3 @@
-/// The OAuth token lifecycle.
-///
-/// Reproduces the exchange the Beatport web player performs: a username and
-/// password buy a session cookie, the session cookie buys an authorization
-/// code, and the code is exchanged for the token pair that authorises later
-/// requests. Only the token pair is persisted, so the password is not stored.
 library;
 
 import 'dart:convert';
@@ -20,20 +14,17 @@ const String loginEndpoint = '/auth/login/';
 
 const Set<int> _redirectStatuses = {301, 302, 303, 307, 308};
 
-/// Beatport rejects unfamiliar clients on the login and authorize endpoints, so
-/// present the same identity a browser would.
 const Map<String, String> defaultHeaders = {
-  'accept': 'application/json',
+  'accept':
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,'
+      'image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
   'accept-language': 'en-US,en;q=0.9',
+  'cache-control': 'max-age=0',
   'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
 };
 
-/// Pulls the session cookie out of a Set-Cookie header.
-///
-/// Dart folds repeated Set-Cookie headers into one comma-joined string, so the
-/// cookie cannot be read by splitting on commas: expiry dates contain them too.
 String? sessionIdFrom(Map<String, String> headers) {
   final raw = headers['set-cookie'];
   if (raw == null) return null;
@@ -41,7 +32,6 @@ String? sessionIdFrom(Map<String, String> headers) {
   return match?.group(1);
 }
 
-/// Owns the token pair: loads it, issues it and keeps it fresh.
 class Authenticator {
   Authenticator({
     required http.Client httpClient,
@@ -59,17 +49,10 @@ class Authenticator {
 
   bool get isAuthenticated => token != null;
 
-  /// Loads a cached token, refreshing it when it is close to expiry.
-  ///
-  /// Returns null when there is nothing usable cached, which is the signal to
-  /// ask for credentials.
   Future<TokenPair?> loadCached({String? username, String? password}) async {
     final cached = await _store.read();
     if (cached == null) return null;
 
-    // A cache issued under different credentials belongs to another account.
-    // Only checked when credentials are known, since a cached token is
-    // otherwise the only thing we have.
     if (username != null && password != null && cached.loginId.isNotEmpty) {
       if (cached.loginId != computeLoginId(username, password)) {
         return null;
@@ -86,7 +69,6 @@ class Authenticator {
     return null;
   }
 
-  /// Renews ahead of expiry, before a request can be rejected for it.
   Future<void> check() async {
     final current = token;
     if (current != null && current.isExpired()) {
@@ -94,14 +76,12 @@ class Authenticator {
     }
   }
 
-  /// Renews the current token. Returns false when a fresh login is required.
   Future<bool> refresh() async {
     final current = token;
     if (current == null) return false;
     return await _tryRefresh(current) != null;
   }
 
-  /// Logs in from scratch and exchanges the result for a token pair.
   Future<TokenPair> logIn(String username, String password) async {
     final sessionId = await _login(username, password);
     final code = await _authorize(sessionId);
@@ -120,8 +100,6 @@ class Authenticator {
     await _store.clear();
   }
 
-  // -- grants ---------------------------------------------------------
-
   Future<TokenPair?> _tryRefresh(TokenPair current) async {
     final refreshToken = current.refreshToken;
     if (refreshToken == null || refreshToken.isEmpty) return null;
@@ -131,16 +109,13 @@ class Authenticator {
         'refresh_token': refreshToken,
         'client_id': _clientId,
       });
-      // The refresh response omits login_id; carry the original forward so the
-      // cache stays tied to the account that issued it.
+
       return _persist(renewed.stamped(loginId: current.loginId));
     } on BeatportException {
-      // Refresh tokens expire and are revoked on password change.
       return null;
     }
   }
 
-  /// Exchanges credentials for a session cookie, as a browser login does.
   Future<String> _login(String username, String password) async {
     final response = await _http.post(
       Uri.parse('$baseUrl$loginEndpoint'),
@@ -167,11 +142,6 @@ class Authenticator {
     return sessionId;
   }
 
-  /// Trades the session cookie for a single-use authorization code.
-  ///
-  /// The code arrives in the Location header of a redirect, so the request must
-  /// not follow it: following would consume the header and land on a page that
-  /// carries no code.
   Future<String> _authorize(String sessionId) async {
     final uri = Uri.parse('$baseUrl$authorizeEndpoint').replace(
       queryParameters: {'client_id': _clientId, 'response_type': 'code'},

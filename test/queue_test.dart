@@ -11,8 +11,6 @@ Track track(int id) => Track(id: id, name: 'Track $id');
 
 void main() {
   group('DownloadQueue history', () {
-    // path_provider has no implementation under flutter test; answer its
-    // channel with a temp dir so the history file has somewhere to live.
     late Directory support;
 
     setUp(() {
@@ -26,8 +24,6 @@ void main() {
 
     tearDown(() => support.deleteSync(recursive: true));
 
-    // Writes history JSON. jsonEncode escapes Windows backslash paths that a
-    // hand-written string would corrupt.
     void writeHistory(List<Map<String, dynamic>> entries) {
       File(
         '${support.path}${Platform.pathSeparator}download_history.json',
@@ -44,7 +40,6 @@ void main() {
     };
 
     test('persists a completion and reloads it', () async {
-      // A record written by one queue must be visible to the next launch.
       writeHistory([record(42, 'strobe.flac')]);
       File(
         '${support.path}${Platform.pathSeparator}strobe.flac',
@@ -66,7 +61,6 @@ void main() {
       await queue.loadHistory();
       await queue.verifyHistory();
 
-      // Kept, not dropped: an unplugged drive must not erase the record.
       expect(queue.historyMark(track(7)), HistoryMark.missing);
       expect(queue.missingCount, 1);
 
@@ -83,8 +77,7 @@ void main() {
       expect(queue.historyCount, 0);
     });
   });
-  // No catalog is bound, so nothing actually downloads and jobs stay queued.
-  // That is exactly the state the queue controls operate on.
+
   group('DownloadQueue', () {
     test('queues a track once', () {
       final queue = DownloadQueue();
@@ -119,8 +112,6 @@ void main() {
     });
 
     test('cancelAll signals cancellation, not just the status', () {
-      // A running job only stops if its token is tripped; flipping the status
-      // alone would leave the download going.
       final queue = DownloadQueue();
       queue.enqueue(track(1));
       final job = queue.jobs.single;
@@ -161,8 +152,6 @@ void main() {
     });
 
     test('enqueueAll notifies once, not once per track', () {
-      // Notifying per track rebuilt the whole results list for every addition,
-      // which froze the UI on a select-all.
       final queue = DownloadQueue();
       var notifications = 0;
       queue.addListener(() => notifications += 1);
@@ -183,8 +172,6 @@ void main() {
     });
 
     test('a large bulk enqueue stays linear', () {
-      // jobFor was a linear scan and enqueueAll called it per track, making a
-      // select-all quadratic. 5000 tracks must not take seconds.
       final queue = DownloadQueue();
       final tracks = [for (var i = 0; i < 5000; i++) track(i)];
 
@@ -200,8 +187,6 @@ void main() {
     });
 
     test('lookup stays correct after removals', () {
-      // The id index has to be kept in step with the list, or a cleared job
-      // would still be found and block re-queueing.
       final queue = DownloadQueue();
       queue.enqueueAll([track(1), track(2)]);
       queue.cancel(queue.jobs.first);

@@ -1,12 +1,3 @@
-/// Locating ffmpeg, and fetching it when the machine does not have it.
-///
-/// Remuxing needs ffmpeg, which most machines do not ship. Rather than send the
-/// user away to install it, a pinned build can be downloaded into the app's own
-/// support directory, leaving the rest of the system untouched.
-///
-/// The build is pinned by version and checked against a hard-coded SHA-256. The
-/// digest is what makes this safe to do automatically: without it the app would
-/// execute whatever the URL happened to return.
 library;
 
 import 'dart:io';
@@ -16,7 +7,6 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-/// A build of ffmpeg that can be fetched for one platform.
 class FfmpegRelease {
   const FfmpegRelease({
     required this.version,
@@ -29,22 +19,13 @@ class FfmpegRelease {
   final String version;
   final String url;
 
-  /// Expected SHA-256 of the downloaded archive, lower-case hex.
   final String sha256;
 
-  /// Path of the ffmpeg binary inside the archive.
   final String archiveEntry;
 
-  /// File name to install it under.
   final String executable;
 }
 
-/// Builds known to be fetchable, by [Platform.operatingSystem].
-///
-/// Only Windows is listed. The static builds published for macOS and Linux do
-/// not have stable versioned URLs to pin a digest against, so those platforms
-/// are asked to install ffmpeg themselves rather than be handed an unverifiable
-/// binary.
 const Map<String, FfmpegRelease> ffmpegReleases = {
   'windows': FfmpegRelease(
     version: '8.1.2',
@@ -66,7 +47,6 @@ class FfmpegException implements Exception {
   String toString() => message;
 }
 
-/// Stage of an in-progress install, for the UI to report.
 enum InstallStage { downloading, verifying, extracting, done }
 
 class InstallProgress {
@@ -83,7 +63,6 @@ class InstallProgress {
   double get fraction => total <= 0 ? 0 : received / total;
 }
 
-/// Finds ffmpeg, and installs it on request.
 class Ffmpeg {
   Ffmpeg({http.Client? httpClient}) : _http = httpClient ?? http.Client();
 
@@ -92,10 +71,8 @@ class Ffmpeg {
 
   void close() => _http.close();
 
-  /// Whether a build can be fetched for the current platform.
   bool get canInstall => ffmpegReleases.containsKey(Platform.operatingSystem);
 
-  /// Where an app-managed copy lives.
   Future<File> managedBinary() async {
     final release = ffmpegReleases[Platform.operatingSystem];
     final name =
@@ -105,10 +82,6 @@ class Ffmpeg {
     return File('${support.path}${separator}ffmpeg$separator$name');
   }
 
-  /// Returns a usable ffmpeg path, or null if none is available.
-  ///
-  /// An app-managed copy wins over one on PATH: if a previous run installed it,
-  /// that is the build whose digest was checked.
   Future<String?> resolve() async {
     if (_resolved != null) return _resolved;
 
@@ -129,11 +102,6 @@ class Ffmpeg {
     }
   }
 
-  /// Downloads, verifies and installs the pinned build, returning its path.
-  ///
-  /// The archive is streamed to disk rather than buffered: the Windows build is
-  /// over 100 MB and holding it in memory alongside its extracted contents is
-  /// avoidable.
   Future<String> install({void Function(InstallProgress)? onProgress}) async {
     final release = ffmpegReleases[Platform.operatingSystem];
     if (release == null) {
@@ -166,7 +134,6 @@ class Ffmpeg {
       onProgress?.call(const InstallProgress(stage: InstallStage.extracting));
       await _extract(archive, release, target);
     } finally {
-      // The partial archive is large; do not leave it behind on failure.
       if (await archive.exists()) {
         await archive.delete().catchError((_) => archive);
       }
@@ -223,10 +190,6 @@ class Ffmpeg {
     return digest.toString();
   }
 
-  /// Pulls the single ffmpeg binary out of the archive.
-  ///
-  /// Only the one known entry is extracted, so a tampered archive cannot write
-  /// to paths of its choosing.
   Future<void> _extract(
     File archive,
     FfmpegRelease release,

@@ -1,18 +1,9 @@
-/// Output paths built from templates.
-///
-/// A flat folder stops being usable at a few hundred tracks, so the download
-/// location is a template that can nest by genre, key, tempo, label or artist.
 library;
 
 import 'models.dart';
 
-/// Placeholder used when a track carries no value for a field.
-///
-/// An empty segment would collapse the path and silently merge unrelated
-/// tracks, so missing values get a visible folder of their own.
 const String unknownValue = 'Unknown';
 
-/// Every placeholder, with a description for the settings screen.
 const Map<String, String> templateFields = {
   'artists': 'Track artists',
   'title': 'Title with mix name',
@@ -32,7 +23,6 @@ const Map<String, String> templateFields = {
   'id': 'Track id',
 };
 
-/// Ready-made folder layouts offered in settings.
 const Map<String, String> folderPresets = {
   'All in one folder': '',
   'Genre': '{genre}',
@@ -45,7 +35,6 @@ const Map<String, String> folderPresets = {
   'Genre / Label': '{genre}/{label}',
 };
 
-/// Groups a tempo into a bucket of [size], e.g. 127 -> "125-129".
 String bpmBucket(int? bpm, int size) {
   if (bpm == null || bpm <= 0) return unknownValue;
   final low = (bpm ~/ size) * size;
@@ -58,7 +47,6 @@ String _year(Track track) {
   return raw.substring(0, 4);
 }
 
-/// Values for every placeholder, for one track.
 Map<String, String> templateValues(Track track) {
   final key = track.key;
   return {
@@ -85,10 +73,6 @@ Map<String, String> templateValues(Track track) {
 
 final RegExp _placeholder = RegExp(r'\{(\w+)\}');
 
-/// Fills [template] from [values].
-///
-/// An unknown placeholder is left as written rather than dropped, so a typo is
-/// visible in the output instead of silently producing a shorter path.
 String renderTemplate(String template, Map<String, String> values) =>
     template.replaceAllMapped(_placeholder, (match) {
       final field = match.group(1)!;
@@ -97,12 +81,6 @@ String renderTemplate(String template, Map<String, String> values) =>
       return value.isEmpty ? unknownValue : value;
     });
 
-/// Splits a folder template into sanitised path segments.
-///
-/// The template is split into segments *before* values are substituted. Doing
-/// it the other way round lets a value that itself contains a slash invent
-/// nesting: a genre of "Drum & Bass / Jungle" would silently become two
-/// folders, and a label of "../.." could climb out of the download directory.
 List<String> folderSegments(String template, Track track) {
   if (template.trim().isEmpty) return const [];
   final values = templateValues(track);
@@ -116,15 +94,14 @@ List<String> folderSegments(String template, Track track) {
 final RegExp _illegal = RegExp(r'[<>:"|?*\x00-\x1f/\\]');
 final RegExp _whitespace = RegExp(r'\s+');
 
-/// Makes one path segment safe on every platform.
 String sanitizeSegment(String value) {
   var cleaned = value
       .replaceAll(_illegal, '')
       .replaceAll(_whitespace, ' ')
       .trim();
-  // Windows creates "name." and "name " but cannot open them afterwards.
+
   cleaned = cleaned.replaceAll(RegExp(r'[. ]+$'), '');
-  // Reserved DOS device names are rejected regardless of extension.
+
   const reserved = {
     'CON',
     'PRN',

@@ -25,7 +25,6 @@ void main() {
     });
 
     test('present defaults true on load; disk state is checked separately', () {
-      // Presence is not persisted: it reflects the disk now, not when saved.
       final json = entry(1, present: false).toJson();
       expect(json.containsKey('present'), isFalse);
       expect(HistoryEntry.fromJson(json)!.present, isTrue);

@@ -1,5 +1,3 @@
-/// Confirms FileTokenStore round-trips the on-disk credentials JSON: a token
-/// written to a file parses back into an identical TokenPair.
 library;
 
 import 'dart:convert';
@@ -27,7 +25,6 @@ void main() {
       final store = FileTokenStore(path);
       await store.write(written);
 
-      // The file must be the documented JSON shape, not an opaque blob.
       final onDisk =
           jsonDecode(await File(path).readAsString()) as Map<String, dynamic>;
       expect(onDisk['access_token'], 'access-token-value');

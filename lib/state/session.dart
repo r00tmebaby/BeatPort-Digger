@@ -1,4 +1,3 @@
-/// Authentication state shared by every screen.
 library;
 
 import 'dart:async';
@@ -44,10 +43,8 @@ class Session extends ChangeNotifier {
 
   Map<int, List<Named>> _subGenres = const {};
 
-  /// Cached sub-genres for a genre, or null if not loaded yet.
   List<Named>? subGenresFor(int genreId) => _subGenres[genreId];
 
-  /// Reuses a cached token so a returning user is not asked to log in again.
   Future<void> restore() async {
     try {
       final cached = await _auth.loadCached();
@@ -76,8 +73,6 @@ class Session extends ChangeNotifier {
       await loadReference();
       return true;
     } on BeatportException catch (exception) {
-      // A rejected login is the common case; say so rather than showing the
-      // raw status line.
       error = exception.status == 401 || exception.status == 400
           ? 'Incorrect username or password.'
           : exception.toString();
@@ -98,12 +93,6 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Populates genres and sub-genres from the on-disk cache immediately, then
-  /// refreshes from the network in the background.
-  ///
-  /// The cached data is shown at once so the filters are usable on launch; the
-  /// refresh updates them a moment later if anything changed. A first run with
-  /// no cache falls straight through to the network.
   Future<void> loadReference() async {
     if (_genres.isEmpty) {
       final cached = await _reference.load();
@@ -111,7 +100,7 @@ class Session extends ChangeNotifier {
         _applyReference(cached);
       }
     }
-    // Fire and forget: the UI is already usable from cache.
+
     unawaited(_refreshReference());
   }
 
@@ -119,9 +108,7 @@ class Session extends ChangeNotifier {
     try {
       final fresh = await _reference.refresh();
       _applyReference(fresh);
-    } on Object {
-      // A failed refresh leaves the cached data in place.
-    }
+    } on Object {}
   }
 
   void _applyReference(ReferenceData data) {

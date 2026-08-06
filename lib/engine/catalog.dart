@@ -1,34 +1,16 @@
-/// Catalog queries: search, filtered listings, genres, and full exports.
 library;
 
 import 'client.dart';
 import 'links.dart';
 import 'models.dart';
 
-/// The search backend refuses an offset at or beyond this, with "Result window
-/// is too large". It bounds one query's reachable rows, not the catalog: a
-/// filter matching more than this can only be read in narrower slices.
 const int resultWindow = 10000;
 
-/// Largest page the API serves reliably. It validates per_page against the
-/// result window, so anything up to [resultWindow] is accepted, but pages
-/// beyond roughly this size spend too long being assembled and return 504.
 const int safeMaxPerPage = 2000;
 
-/// Bounds for dividing a query by tempo. The ceiling is far above any real
-/// track so the top bucket cannot strand outliers outside every range.
 const int bpmFloor = 0;
 const int bpmCeiling = 1000;
 
-/// Sort keys the API honours, each also accepted with a "-" prefix. An
-/// unrecognised key is not rejected: it returns an empty page with a zero
-/// count, which is indistinguishable from a filter that matched nothing.
-/// Sort keys the API honours, each also accepted with a "-" prefix.
-///
-/// "plays" and "downloads" are the only popularity measures that exist;
-/// popularity, trending, rank, sales and hype are all rejected. Only their
-/// descending forms are worth offering: ascending is unstable between requests
-/// because thousands of tracks tie at zero.
 const Set<String> orderByFields = {
   'publish_date',
   'name',
@@ -38,7 +20,6 @@ const Set<String> orderByFields = {
   'downloads',
 };
 
-/// Rejects sort keys the API would answer with a silent empty result.
 String validateOrderBy(String orderBy) {
   final field = orderBy.startsWith('-') ? orderBy.substring(1) : orderBy;
   if (field.isNotEmpty && !orderByFields.contains(field)) {
@@ -55,8 +36,6 @@ String _isoDate(DateTime date) =>
     '${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
 
-/// Reads a bpm filter as a range, or null if it cannot be divided further.
-/// An exact value such as "128" cannot be narrowed.
 ({int low, int high})? bpmBounds(String? bpm) {
   if (bpm == null || bpm.isEmpty) {
     return (low: bpmFloor, high: bpmCeiling);
@@ -69,13 +48,6 @@ String _isoDate(DateTime date) =>
   return (low: low, high: high);
 }
 
-/// Filters for /catalog/tracks/.
-///
-/// Ranges use the API's slice syntax: "120:130", ":130", "120:",
-/// "2026-01-01:2026-06-30".
-///
-/// Date filtering is on new_release_date. A publish_date range is accepted by
-/// the API and then ignored, which silently returns the unfiltered catalog.
 class TrackQuery {
   TrackQuery({
     this.genreId,
@@ -102,31 +74,20 @@ class TrackQuery {
   List<int>? artistId;
   List<String>? keyName;
 
-  /// Key ids to match. Prefer this over [keyName], which cannot express more
-  /// than one key: the API answers a comma-joined key_name with zero results
-  /// and honours only the last of a repeated key_name.
   List<int>? keyId;
   String? bpm;
   String? newReleaseDate;
 
-  /// Title contains. Matched as a substring.
   String? name;
 
-  /// Artist name contains. Substring and case-insensitive, so "Beyer" matches
-  /// every artist with that in their name, not one specific artist.
   String? artistName;
 
-  /// Label name contains. Substring and case-insensitive.
   String? labelName;
 
-  /// Restrict to Beatport Hype releases. A real server filter, unlike the
-  /// exclusive/dj-edit/pre-order flags which the API ignores.
   bool? isHype;
 
-  /// Restrict to catalogue classics.
   bool? isClassic;
 
-  /// Restrict to explicit tracks.
   bool? isExplicit;
 
   String orderBy;
@@ -151,7 +112,6 @@ class TrackQuery {
     perPage: perPage,
   );
 
-  /// A copy restricted to a release-date window.
   TrackQuery dated(DateTime start, DateTime end) =>
       copy()..newReleaseDate = '${_isoDate(start)}:${_isoDate(end)}';
 
@@ -178,7 +138,6 @@ class TrackQuery {
   };
 }
 
-/// Progress reported while an export walks the catalog.
 class ExportWindow {
   const ExportWindow(this.low, this.high, this.total, {this.truncated = false});
 
@@ -186,8 +145,6 @@ class ExportWindow {
   final DateTime high;
   final int total;
 
-  /// Set when the window could not be divided small enough to read in one
-  /// request, so paging may have dropped rows.
   final bool truncated;
 
   String get label =>
@@ -206,7 +163,6 @@ class Catalog {
     return Paginated.fromJson(payload, Genre.fromJson).results;
   }
 
-  /// Genres, fetched once: dividing a broad export re-reads them often.
   Future<List<Genre>> allGenres() async => _genreCache ??= await genres();
 
   Future<List<Named>> subGenres(int genreId, {int perPage = 100}) async {
@@ -216,12 +172,10 @@ class Catalog {
     return Paginated.fromJson(payload, Named.fromJson).results;
   }
 
-  /// The HLS stream for a track, used by the downloader.
   Future<TrackStream> trackStream(int trackId) async => TrackStream.fromJson(
     await client.get('/catalog/tracks/$trackId/stream/'),
   );
 
-  /// A direct download URL for a track at the requested quality.
   Future<TrackDownload> trackDownload(int trackId, String quality) async =>
       TrackDownload.fromJson(
         await client.get('/catalog/tracks/$trackId/download/', {
@@ -229,11 +183,6 @@ class Catalog {
         }),
       );
 
-  /// Every track behind a link, following pagination.
-  ///
-  /// Labels and artists are read through the tracks endpoint rather than their
-  /// own listings, which return releases and would need a second request each
-  /// to reach the tracks.
   Stream<Track> linkTracks(BeatportLink link, {int limit = 100000}) async* {
     switch (link.type) {
       case LinkType.track:
@@ -252,7 +201,6 @@ class Catalog {
     }
   }
 
-  /// A human label for a link, for the queue to show while it resolves.
   Future<String> linkTitle(BeatportLink link) async {
     final path = switch (link.type) {
       LinkType.track => '/catalog/tracks/${link.id}/',
@@ -287,7 +235,6 @@ class Catalog {
     }
   }
 
-  /// Playlist entries wrap the track in a positioned item.
   Stream<Track> _pagedPlaylist(String path, int limit) async* {
     var page = 1;
     var seen = 0;
@@ -306,7 +253,6 @@ class Catalog {
     }
   }
 
-  /// Every musical key the catalog knows, fetched once.
   Future<List<Key>> allKeys() async {
     final cached = _keyCache;
     if (cached != null) return cached;
@@ -314,11 +260,6 @@ class Catalog {
     return _keyCache = Paginated.fromJson(payload, Key.fromJson).results;
   }
 
-  /// Key ids grouped by Camelot code.
-  ///
-  /// A code can carry more than one id, because the catalog stores enharmonic
-  /// spellings separately: 1A is both "G# Minor" and "Ab Minor". Filtering by a
-  /// single name would silently miss every track filed under the other.
   Future<Map<String, List<int>>> keyIdsByCamelot() async {
     final grouped = <String, List<int>>{};
     for (final key in await allKeys()) {
@@ -348,14 +289,12 @@ class Catalog {
     );
   }
 
-  /// Number of tracks matching a filter, clamped to [resultWindow].
   Future<int> count(TrackQuery query) async {
     final params = query.params()..['per_page'] = 1;
     final payload = await client.get('/catalog/tracks/', params);
     return (payload['count'] as num?)?.toInt() ?? 0;
   }
 
-  /// Yields up to [limit] tracks, following pagination.
   Stream<Track> iterTracks(TrackQuery query, {int limit = 500}) async* {
     var seen = 0;
     var page = 1;
@@ -372,13 +311,6 @@ class Catalog {
     }
   }
 
-  /// Narrows a query still too large for one request, or null if it cannot be
-  /// narrowed further.
-  ///
-  /// Genre is tried first, since an export with no genre filter is what makes a
-  /// single day overflow. Tempo is the fallback: every track carries a bpm,
-  /// whereas sub-genre is set on under a tenth of them and would silently drop
-  /// the rest.
   Future<List<TrackQuery>?> _divide(TrackQuery query) async {
     final hasGenre = query.genreId != null && query.genreId!.isNotEmpty;
     final hasSubGenre =
@@ -404,13 +336,11 @@ class Catalog {
     ];
   }
 
-  /// Reads a window whole, in one request sized to its contents.
   Future<List<Track>> _readSized(TrackQuery query, int total) async {
     final sized = query.copy()..perPage = total < 1 ? 1 : total;
     return (await tracks(sized, page: 1)).results;
   }
 
-  /// Yields every track in one window, stopping at the reachable offset.
   Stream<Track> _pageWindow(TrackQuery query) async* {
     var page = 1;
     var offset = 0;
@@ -424,7 +354,6 @@ class Catalog {
     }
   }
 
-  /// Reads one day, dividing it further when it exceeds a single request.
   Stream<Track> _readDay(
     TrackQuery query,
     DateTime day,
@@ -454,8 +383,6 @@ class Catalog {
         continue;
       }
 
-      // Nothing left to divide by. Paging is the only way through and may drop
-      // rows that shift between pages.
       onWindow?.call(ExportWindow(day, day, total, truncated: true));
       await for (final track in _pageWindow(current)) {
         final id = track.id;
@@ -465,13 +392,6 @@ class Catalog {
     }
   }
 
-  /// Yields every track between two release dates.
-  ///
-  /// A date window whose matches do not fit in one page is halved until it
-  /// does, so the reachable total is bounded by the catalog rather than by the
-  /// result window. Reading each window in a single request also avoids paging:
-  /// the sort is not stable across pages, so tied rows shift between requests
-  /// and a row can be missed entirely.
   Stream<Track> exportTracks(
     TrackQuery query,
     DateTime start,
@@ -484,15 +404,11 @@ class Catalog {
     while (pending.isNotEmpty) {
       final (low, high) = pending.removeLast();
       final window = query.dated(low, high);
-      // Size the window with a one-row request. Most windows in a broad export
-      // are only visited to be split, and probing cheaply keeps those visits
-      // from transferring a full page that is discarded.
+
       final total = await count(window);
       if (total == 0) continue;
 
       if (total > query.perPage && low.isBefore(high)) {
-        // Halve and revisit. The later half is pushed first so the earlier half
-        // is popped, keeping the output chronological.
         final midpoint = low.add(
           Duration(days: high.difference(low).inDays ~/ 2),
         );
@@ -502,8 +418,6 @@ class Catalog {
       }
 
       if (total > safeMaxPerPage) {
-        // A single day past one request. It cannot be split by date any
-        // further, so divide it by genre or tempo instead.
         yield* _readDay(query, low, seen, onWindow);
         continue;
       }

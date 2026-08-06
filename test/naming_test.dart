@@ -58,7 +58,6 @@ void main() {
     });
 
     test('falls back to a visible folder when a value is missing', () {
-      // An empty segment would collapse the path and merge unrelated tracks.
       final values = templateValues(make(genre: null));
       expect(renderTemplate('{genre}', values), unknownValue);
     });
@@ -93,13 +92,10 @@ void main() {
     });
 
     test('a value containing a slash cannot invent nesting', () {
-      // "Drum & Bass / Jungle" as a genre must stay one folder, and a value
-      // like "../.." must not climb out of the download directory.
       expect(folderSegments('{genre}', make(genre: 'Drum & Bass / Jungle')), [
         'Drum & Bass Jungle',
       ]);
-      // Separators inside a value are stripped, so the traversal collapses to
-      // one harmless folder instead of climbing out.
+
       expect(folderSegments('{label}', make(label: r'..\..\Windows')), [
         '....Windows',
       ]);
@@ -120,13 +116,11 @@ void main() {
     });
 
     test('trims trailing dots and spaces', () {
-      // Windows will create "name." but cannot open it afterwards.
       expect(sanitizeSegment('name.'), 'name');
       expect(sanitizeSegment('name  '), 'name');
     });
 
     test('escapes reserved device names', () {
-      // "CON" and "NUL" are rejected by Windows whatever the extension.
       expect(sanitizeSegment('CON'), '_CON');
       expect(sanitizeSegment('nul'), '_nul');
       expect(sanitizeSegment('CONTROL'), 'CONTROL');

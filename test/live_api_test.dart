@@ -1,8 +1,3 @@
-/// Live checks against the Beatport API.
-///
-/// Tagged live and skipped by default so the normal test run stays offline.
-/// Needs credentials in BEATPORT_USERNAME and BEATPORT_PASSWORD. Run with:
-///   flutter test test/live_api_test.dart --run-skipped
 @Tags(['live'])
 library;
 
@@ -95,8 +90,6 @@ void main() {
   test(
     'publish_date is ignored by the API, new_release_date is not',
     () async {
-      // The API silently disregards a publish_date range: it is accepted and then
-      // ignored, returning the unfiltered catalog.
       final filtered = TrackQuery(
         genreId: [89],
         orderBy: 'publish_date',
@@ -137,8 +130,6 @@ void main() {
   test(
     'exports a full year as a stable, deduplicated track count',
     () async {
-      // Amapiano 2023 resolves to 4,427 distinct tracks across two split
-      // strategies; the count must stay stable.
       final query = TrackQuery(
         genreId: [98],
         orderBy: 'publish_date',
