@@ -52,6 +52,18 @@ class ThroughputMeter {
   }
 }
 
+/// Renders a byte count with the largest unit that keeps the number small,
+/// so a long session reads as gigabytes instead of four-digit megabytes.
+String formatBytes(int bytes) {
+  const kb = 1024.0;
+  const mb = 1024.0 * 1024.0;
+  const gb = 1024.0 * 1024.0 * 1024.0;
+  if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(1)} GB';
+  if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(0)} MB';
+  if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(0)} KB';
+  return '$bytes B';
+}
+
 /// Renders a rate the way download UIs conventionally do.
 String formatSpeed(double bytesPerSecond) {
   const kb = 1024.0;

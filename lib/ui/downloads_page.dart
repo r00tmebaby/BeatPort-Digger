@@ -148,7 +148,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     if (queue.activeCount > 0)
                       formatSpeed(queue.bytesPerSecond),
                     if (queue.bytesThisSession > 0)
-                      '${(queue.bytesThisSession / (1024 * 1024)).toStringAsFixed(0)} MB this session',
+                      '${formatBytes(queue.bytesThisSession)} this session',
                   ].join(' · '),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),

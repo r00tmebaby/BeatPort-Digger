@@ -72,4 +72,18 @@ void main() {
       expect(formatSpeed(2.5 * 1024 * 1024), '2.5 MB/s');
     });
   });
+
+  group('formatBytes', () {
+    test('rolls up to the largest sensible unit', () {
+      expect(formatBytes(0), '0 B');
+      expect(formatBytes(800), '800 B');
+      expect(formatBytes(64 * 1024), '64 KB');
+      expect(formatBytes(250 * 1024 * 1024), '250 MB');
+      expect(
+        formatBytes(1847 * 1024 * 1024),
+        '1.8 GB',
+        reason: 'four-digit megabytes read as a mistake, not a total',
+      );
+    });
+  });
 }
