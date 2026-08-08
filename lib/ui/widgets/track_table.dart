@@ -419,16 +419,13 @@ class _DownloadButton extends StatelessWidget {
           icon: Icon(Icons.schedule, size: 20),
         );
       case JobStatus.running:
-        return const SizedBox(
-          width: 40,
-          height: 40,
-          child: Center(
-            child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
+        // A static icon, not a spinner: a page of results mid-bulk-download
+        // can show dozens of running rows, and each spinner animates every
+        // frame for as long as it is visible.
+        return IconButton(
+          onPressed: null,
+          tooltip: 'Downloading',
+          icon: Icon(Icons.downloading, size: 20, color: scheme.primary),
         );
       case JobStatus.completed:
         return IconButton(

@@ -128,79 +128,32 @@ class _DownloadsPageState extends State<DownloadsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final queue = context.watch<DownloadQueue>();
+    // Not a watch: every notify used to rebuild this whole page, list and
+    // all, several times a second while downloading. The header and active
+    // strip are small and genuinely live, so they follow the queue through
+    // one ListenableBuilder; the list itself rebuilds only when jobs are
+    // added or removed (or a status changes while ordered by status), and
+    // each visible tile keeps itself fresh.
+    final queue = context.read<DownloadQueue>();
+    context.select<DownloadQueue, (int, int)>(
+      (q) => (q.structureRevision, _order == _JobOrder.status ? q.revision : 0),
+    );
     final jobs = _ordered(queue);
     final newestFirst = _order == _JobOrder.recent;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (jobs.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
-            child: Row(
-              children: [
-                Text(
-                  [
-                    '${queue.activeCount} active, ${jobs.length} total',
-                    // The figure that separates "64 at once is faster" from
-                    // "64 at once slices the same pipe thinner".
-                    if (queue.activeCount > 0)
-                      formatSpeed(queue.bytesPerSecond),
-                    if (queue.bytesThisSession > 0)
-                      '${formatBytes(queue.bytesThisSession)} this session',
-                  ].join(' · '),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<_JobOrder>(
-                  value: _order,
-                  isDense: true,
-                  underline: const SizedBox.shrink(),
-                  onChanged: (value) =>
-                      setState(() => _order = value ?? _JobOrder.recent),
-                  items: const [
-                    DropdownMenuItem(
-                      value: _JobOrder.recent,
-                      child: Text('Recent'),
-                    ),
-                    DropdownMenuItem(
-                      value: _JobOrder.status,
-                      child: Text('Status'),
-                    ),
-                    DropdownMenuItem(
-                      value: _JobOrder.title,
-                      child: Text('Title'),
-                    ),
-                    DropdownMenuItem(
-                      value: _JobOrder.artist,
-                      child: Text('Artist'),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-
-                if (queue.activeCount > 0)
-                  FilledButton.tonalIcon(
-                    onPressed: queue.cancelAll,
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: Text('Stop all (${queue.activeCount})'),
-                  ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: queue.clearFinished,
-                  icon: const Icon(Icons.clear_all, size: 18),
-                  label: const Text('Clear finished'),
-                ),
-                TextButton.icon(
-                  onPressed: queue.clearAll,
-                  icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-                  label: const Text('Clear all'),
-                ),
-              ],
-            ),
+        ListenableBuilder(
+          listenable: queue,
+          builder: (context, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (queue.jobs.isNotEmpty) _header(context, queue),
+              if (queue.active.isNotEmpty) _ActiveStrip(queue: queue),
+            ],
           ),
-        if (queue.active.isNotEmpty) _ActiveStrip(queue: queue),
+        ),
         Expanded(
           child: jobs.isEmpty
               ? Center(
@@ -214,23 +167,27 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   itemCount: jobs.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    // queue.jobs is a live view, so a clear landing between
-                    // this frame's itemCount and the rebuild that follows it
-                    // can leave an index pointing past the end.
+                    // jobs is a live view, so a clear landing between this
+                    // frame's itemCount and the rebuild that follows it can
+                    // leave an index pointing past the end.
                     if (index >= jobs.length) return const SizedBox.shrink();
 
-                    // "Recent" reads the queue's own list backwards instead of
-                    // materialising a reversed copy of it.
+                    // "Recent" reads the queue's own list backwards instead
+                    // of materialising a reversed copy of it.
                     final job = newestFirst
                         ? jobs[jobs.length - 1 - index]
                         : jobs[index];
-                    return _JobTile(
-                      job: job,
+                    return _LiveTile(
                       queue: queue,
-                      onPlay: () => _play(
-                        context,
-                        job,
-                        newestFirst ? jobs.reversed : jobs,
+                      job: job,
+                      builder: (context) => _JobTile(
+                        job: job,
+                        queue: queue,
+                        onPlay: () => _play(
+                          context,
+                          job,
+                          newestFirst ? jobs.reversed : jobs,
+                        ),
                       ),
                     );
                   },
@@ -239,6 +196,58 @@ class _DownloadsPageState extends State<DownloadsPage> {
       ],
     );
   }
+
+  Widget _header(BuildContext context, DownloadQueue queue) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+    child: Row(
+      children: [
+        Text(
+          [
+            '${queue.activeCount} active, ${queue.jobs.length} total',
+            // The figure that separates "64 at once is faster" from
+            // "64 at once slices the same pipe thinner".
+            if (queue.activeCount > 0) formatSpeed(queue.bytesPerSecond),
+            if (queue.bytesThisSession > 0)
+              '${formatBytes(queue.bytesThisSession)} this session',
+          ].join(' · '),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(width: 12),
+        DropdownButton<_JobOrder>(
+          value: _order,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          onChanged: (value) =>
+              setState(() => _order = value ?? _JobOrder.recent),
+          items: const [
+            DropdownMenuItem(value: _JobOrder.recent, child: Text('Recent')),
+            DropdownMenuItem(value: _JobOrder.status, child: Text('Status')),
+            DropdownMenuItem(value: _JobOrder.title, child: Text('Title')),
+            DropdownMenuItem(value: _JobOrder.artist, child: Text('Artist')),
+          ],
+        ),
+        const Spacer(),
+
+        if (queue.activeCount > 0)
+          FilledButton.tonalIcon(
+            onPressed: queue.cancelAll,
+            icon: const Icon(Icons.stop_circle_outlined, size: 18),
+            label: Text('Stop all (${queue.activeCount})'),
+          ),
+        const SizedBox(width: 8),
+        TextButton.icon(
+          onPressed: queue.clearFinished,
+          icon: const Icon(Icons.clear_all, size: 18),
+          label: const Text('Clear finished'),
+        ),
+        TextButton.icon(
+          onPressed: queue.clearAll,
+          icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+          label: const Text('Clear all'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// The tracks actually moving right now, pinned above the queue.
@@ -333,10 +342,14 @@ class _ActiveTile extends StatelessWidget {
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 4),
+                // Determinate always: an unknown total shows an empty bar
+                // rather than the indeterminate sweep, because each sweep
+                // animates every frame forever and a screenful of them is
+                // most of what made this page feel busy and heavy.
                 LinearProgressIndicator(
                   minHeight: 3,
                   value: progress == null || progress.total == 0
-                      ? null
+                      ? 0
                       : progress.fraction,
                 ),
               ],
@@ -369,6 +382,75 @@ class _ActiveTile extends StatelessWidget {
 
 String _megabytes(int bytes) =>
     '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
+/// What one tile shows of a job's mutable state, compared by value to decide
+/// whether that tile repaints.
+typedef _TileState = (JobStatus, int, int, bool);
+
+/// One queue tile that follows the queue on its own, so the list above it
+/// never rebuilds for job churn. Running tiles repaint as their bytes climb;
+/// the queued and finished tiles around them - the bulk of what is visible -
+/// ignore every notification. Same pattern as the track table's live rows.
+class _LiveTile extends StatefulWidget {
+  const _LiveTile({
+    required this.queue,
+    required this.job,
+    required this.builder,
+  });
+
+  final DownloadQueue queue;
+  final DownloadJob job;
+  final WidgetBuilder builder;
+
+  @override
+  State<_LiveTile> createState() => _LiveTileState();
+}
+
+class _LiveTileState extends State<_LiveTile> {
+  // Assigned in initState: a late initializer would run lazily inside the
+  // first change check, after the state already moved, and never repaint.
+  late _TileState _last;
+
+  _TileState _snap() => (
+    widget.job.status,
+    widget.job.progress?.bytes ?? -1,
+    widget.job.progress?.completed ?? -1,
+    widget.job.error != null,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _last = _snap();
+    widget.queue.addListener(_check);
+  }
+
+  @override
+  void didUpdateWidget(_LiveTile old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.queue, widget.queue)) {
+      old.queue.removeListener(_check);
+      widget.queue.addListener(_check);
+    }
+    // The list rebuilt, possibly handing this element a different job.
+    _last = _snap();
+  }
+
+  @override
+  void dispose() {
+    widget.queue.removeListener(_check);
+    super.dispose();
+  }
+
+  void _check() {
+    final next = _snap();
+    if (next == _last) return;
+    setState(() => _last = next);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
+}
 
 class _JobTile extends StatelessWidget {
   const _JobTile({
@@ -404,10 +486,13 @@ class _JobTile extends StatelessWidget {
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 4),
+          // Determinate always, for the same reason as the strip above: the
+          // indeterminate sweep repaints every frame for as long as it is on
+          // screen.
           if (job.status == JobStatus.running)
             LinearProgressIndicator(
               value: progress == null || progress.total == 0
-                  ? null
+                  ? 0
                   : progress.fraction,
             ),
           Text(
