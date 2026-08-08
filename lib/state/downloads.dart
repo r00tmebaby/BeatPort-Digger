@@ -16,6 +16,7 @@ import '../engine/errors.dart';
 import '../engine/ffmpeg.dart';
 import '../engine/media_store.dart';
 import '../engine/models.dart';
+import '../engine/throughput.dart';
 
 enum JobStatus { queued, running, completed, failed, cancelled }
 
@@ -317,6 +318,17 @@ class DownloadQueue extends ChangeNotifier {
 
   bool get isBusy => _unfinished > 0;
   int get activeCount => _unfinished;
+
+  final ThroughputMeter _throughput = ThroughputMeter();
+
+  /// Combined download rate across every running job, over the last few
+  /// seconds. This is the figure that says whether sixty-four parallel
+  /// downloads are actually faster than eight, which nothing in the app
+  /// answered before.
+  double get bytesPerSecond => _throughput.bytesPerSecond(DateTime.now());
+
+  /// Bytes downloaded since the app started.
+  int get bytesThisSession => _throughput.total;
 
   bool _ffmpegReady = false;
   bool _ffmpegChecked = false;
@@ -1053,6 +1065,14 @@ class DownloadQueue extends ChangeNotifier {
         onProgress: (progress) {
           final previous = job.progress;
           job.progress = progress;
+
+          // Recorded on every callback, before the publish throttle: the
+          // meter needs all the bytes, the UI only needs some of the frames.
+          _throughput.record(
+            progress.bytes - (previous?.bytes ?? 0),
+            DateTime.now(),
+          );
+
           if (_shouldPublishProgress(previous, progress)) {
             _notifyProgress();
           }

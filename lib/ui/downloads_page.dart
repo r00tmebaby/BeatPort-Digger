@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../engine/throughput.dart';
 import '../state/downloads.dart';
 import '../state/player.dart';
 
@@ -140,7 +141,15 @@ class _DownloadsPageState extends State<DownloadsPage> {
             child: Row(
               children: [
                 Text(
-                  '${queue.activeCount} active, ${jobs.length} total',
+                  [
+                    '${queue.activeCount} active, ${jobs.length} total',
+                    // The figure that separates "64 at once is faster" from
+                    // "64 at once slices the same pipe thinner".
+                    if (queue.activeCount > 0)
+                      formatSpeed(queue.bytesPerSecond),
+                    if (queue.bytesThisSession > 0)
+                      '${(queue.bytesThisSession / (1024 * 1024)).toStringAsFixed(0)} MB this session',
+                  ].join(' · '),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(width: 12),
@@ -271,7 +280,8 @@ class _ActiveStrip extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
             child: Text(
-              'Downloading now (${active.length})',
+              'Downloading now (${active.length}) · '
+              '${formatSpeed(queue.bytesPerSecond)}',
               style: theme.textTheme.labelMedium?.copyWith(
                 color: theme.colorScheme.primary,
                 fontWeight: FontWeight.w600,

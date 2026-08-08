@@ -138,15 +138,16 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               Text(
                 'A track the account can download outright is one connection, '
-                'so this is $concurrent connections at FLAC. A track that '
-                'falls back to the stream fetches $segmentWindow segments at '
-                'once and then runs ffmpeg, so a queue of those is nearer '
-                '${concurrent * segmentWindow} connections and up to '
-                '$concurrent ffmpeg processes.\n\n'
-                'Catalog requests are throttled separately, so raising this '
-                'does not push harder on the API. Past the point where your '
-                'connection is saturated it stops helping: the same bandwidth '
-                'is split more ways and stalled transfers start timing out.',
+                'so this is $concurrent connections at FLAC. Stream-fallback '
+                'tracks fetch $segmentWindow segments each but share an '
+                'app-wide cap of $totalSegmentWindow segment fetches and '
+                '$maxParallelRemux ffmpeg remuxes, so on a stream-only '
+                'account the pipe is already full at about '
+                '${totalSegmentWindow ~/ segmentWindow} parallel tracks. '
+                'Raising it further splits the same speed across more '
+                'crawling tracks - watch the MB/s figure on the Downloads '
+                'page while changing this to see what your connection '
+                'actually does.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
