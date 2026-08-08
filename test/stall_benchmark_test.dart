@@ -125,8 +125,10 @@ void main() {
     // ignore: avoid_print
     print('\n=== event loop, $size queued ===');
     // ignore: avoid_print
-    print('${'step'.padRight(22)} ${'wall'.padLeft(8)}'
-        '${'worst'.padLeft(8)}${'blocked'.padLeft(9)}');
+    print(
+      '${'step'.padRight(22)} ${'wall'.padLeft(8)}'
+      '${'worst'.padLeft(8)}${'blocked'.padLeft(9)}',
+    );
     for (final entry in report.entries) {
       final s = entry.value;
       // ignore: avoid_print

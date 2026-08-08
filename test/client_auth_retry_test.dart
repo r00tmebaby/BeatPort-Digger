@@ -31,10 +31,7 @@ void main() {
         if (request.url.path.endsWith('/auth/o/token/')) {
           tokenRequests += 1;
           if (tokenRequests > 1) {
-            return http.Response(
-              jsonEncode({'error': 'invalid_grant'}),
-              400,
-            );
+            return http.Response(jsonEncode({'error': 'invalid_grant'}), 400);
           }
           return http.Response(
             jsonEncode({
@@ -65,7 +62,10 @@ void main() {
         return http.Response('not found', 404);
       });
 
-      final auth = Authenticator(httpClient: client, store: _MemoryTokenStore());
+      final auth = Authenticator(
+        httpClient: client,
+        store: _MemoryTokenStore(),
+      );
       auth.token = TokenPair(
         accessToken: 'stale-access',
         refreshToken: 'stale-refresh',
@@ -83,7 +83,8 @@ void main() {
       expect(
         tokenRequests,
         1,
-        reason: 'stale in-flight requests should not spend another refresh token',
+        reason:
+            'stale in-flight requests should not spend another refresh token',
       );
       expect(auth.token?.accessToken, 'fresh-access');
     },

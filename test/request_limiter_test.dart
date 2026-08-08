@@ -70,7 +70,8 @@ void main() {
 
       final served = <int>[];
       final waiters = [
-        for (var i = 0; i < 3; i++) limiter.acquire().then((_) => served.add(i)),
+        for (var i = 0; i < 3; i++)
+          limiter.acquire().then((_) => served.add(i)),
       ];
 
       for (var i = 0; i < 3; i++) {

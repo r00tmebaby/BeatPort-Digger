@@ -19,10 +19,8 @@ enum SessionStatus { restoring, signedOut, signedIn }
 class Session extends ChangeNotifier {
   Session({http.Client? httpClient, TokenStore? store})
     : _http = httpClient ?? http.Client() {
-    _auth = Authenticator(
-      httpClient: _http,
-      store: store ?? SecureTokenStore(),
-    )..onSessionExpired = _handleSessionExpired;
+    _auth = Authenticator(httpClient: _http, store: store ?? SecureTokenStore())
+      ..onSessionExpired = _handleSessionExpired;
     catalog = Catalog(BeatportClient(auth: _auth, httpClient: _http));
     _reference = ReferenceCache(catalog);
   }

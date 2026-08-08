@@ -132,7 +132,10 @@ void main() {
 
     test('the collapse ignores case', () {
       expect(
-        folderSegments('{genre}/{label}', make(genre: 'Techno', label: 'TECHNO')),
+        folderSegments(
+          '{genre}/{label}',
+          make(genre: 'Techno', label: 'TECHNO'),
+        ),
         ['Techno'],
       );
     });

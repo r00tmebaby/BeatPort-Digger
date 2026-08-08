@@ -47,7 +47,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
     });
   }
 
-  void _play(BuildContext context, DownloadJob job, Iterable<DownloadJob> jobs) {
+  void _play(
+    BuildContext context,
+    DownloadJob job,
+    Iterable<DownloadJob> jobs,
+  ) {
     final player = context.read<PreviewPlayer>();
 
     // Built here rather than during build: at scale this is a full scan, and

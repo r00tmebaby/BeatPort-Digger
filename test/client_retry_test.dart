@@ -73,7 +73,11 @@ void main() {
         throwsA(
           isA<BeatportException>()
               .having((e) => e.status, 'status', 403)
-              .having((e) => e, 'is not an auth failure', isNot(isA<AuthException>())),
+              .having(
+                (e) => e,
+                'is not an auth failure',
+                isNot(isA<AuthException>()),
+              ),
         ),
       );
 
@@ -167,11 +171,10 @@ void main() {
 
       expect(await api.get('/catalog/tracks/'), containsPair('ok', true));
       expect(attempts, 3);
-      expect(
-        slept,
-        [const Duration(milliseconds: 250), const Duration(milliseconds: 500)],
-        reason: 'the wait should grow between attempts',
-      );
+      expect(slept, [
+        const Duration(milliseconds: 250),
+        const Duration(milliseconds: 500),
+      ], reason: 'the wait should grow between attempts');
     });
 
     test('Retry-After wins over the computed backoff', () async {
@@ -221,7 +224,9 @@ void main() {
 
       await expectLater(
         api.get('/catalog/tracks/'),
-        throwsA(isA<BeatportException>().having((e) => e.status, 'status', 429)),
+        throwsA(
+          isA<BeatportException>().having((e) => e.status, 'status', 429),
+        ),
       );
       expect(attempts, maxRequestAttempts);
     });
@@ -265,30 +270,37 @@ void main() {
   });
 
   group('a dead session', () {
-    test('a rejected refresh token ends the session once, not forever', () async {
-      var expiries = 0;
+    test(
+      'a rejected refresh token ends the session once, not forever',
+      () async {
+        var expiries = 0;
 
-      final client = MockClient((request) async {
-        if (request.url.path.endsWith('/auth/o/token/')) {
-          return http.Response(jsonEncode({'error': 'invalid_grant'}), 400);
-        }
-        return http.Response('', 401);
-      });
+        final client = MockClient((request) async {
+          if (request.url.path.endsWith('/auth/o/token/')) {
+            return http.Response(jsonEncode({'error': 'invalid_grant'}), 400);
+          }
+          return http.Response('', 401);
+        });
 
-      final auth = _authWith(client)..onSessionExpired = () => expiries += 1;
-      final api = BeatportClient(auth: auth, httpClient: client);
+        final auth = _authWith(client)..onSessionExpired = () => expiries += 1;
+        final api = BeatportClient(auth: auth, httpClient: client);
 
-      await expectLater(api.get('/catalog/tracks/'), throwsA(isA<AuthException>()));
+        await expectLater(
+          api.get('/catalog/tracks/'),
+          throwsA(isA<AuthException>()),
+        );
 
-      expect(auth.sessionExpired, isTrue);
-      expect(
-        auth.token,
-        isNull,
-        reason: 'holding a dead token made every later request fail while the '
-            'app still looked signed in',
-      );
-      expect(expiries, 1);
-    });
+        expect(auth.sessionExpired, isTrue);
+        expect(
+          auth.token,
+          isNull,
+          reason:
+              'holding a dead token made every later request fail while the '
+              'app still looked signed in',
+        );
+        expect(expiries, 1);
+      },
+    );
 
     test('a 5xx from the token endpoint keeps the session', () async {
       final client = MockClient((request) async {
@@ -301,7 +313,10 @@ void main() {
       final auth = _authWith(client);
       final api = BeatportClient(auth: auth, httpClient: client);
 
-      await expectLater(api.get('/catalog/tracks/'), throwsA(isA<AuthException>()));
+      await expectLater(
+        api.get('/catalog/tracks/'),
+        throwsA(isA<AuthException>()),
+      );
       expect(
         auth.token,
         isNotNull,
@@ -346,7 +361,8 @@ void main() {
       expect(
         tokenRequests,
         1,
-        reason: 'sixteen downloads hitting 401 together must not spend '
+        reason:
+            'sixteen downloads hitting 401 together must not spend '
             'sixteen single-use refresh tokens',
       );
     });

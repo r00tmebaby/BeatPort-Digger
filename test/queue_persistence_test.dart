@@ -7,7 +7,8 @@ import 'package:beatport_digger/state/downloads.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Track _track(int id, {String name = 'Track'}) => Track(id: id, name: '$name $id');
+Track _track(int id, {String name = 'Track'}) =>
+    Track(id: id, name: '$name $id');
 
 Track _richTrack() => const Track(
   id: 4242,
@@ -46,9 +47,7 @@ void main() {
       File('${support.path}${Platform.pathSeparator}download_queue.jsonl');
 
   void writeQueueFile(List<Map<String, dynamic>> records) {
-    queueFile().writeAsStringSync(
-      records.map(jsonEncode).join('\n'),
-    );
+    queueFile().writeAsStringSync(records.map(jsonEncode).join('\n'));
   }
 
   void writeHistoryFile(List<Map<String, dynamic>> records) {
@@ -114,17 +113,20 @@ void main() {
       expect(restored.jobs.map((job) => job.track.id), [2]);
     });
 
-    test('an empty queue leaves an empty file rather than a stale one', () async {
-      final queue = DownloadQueue();
-      queue.enqueue(_track(1));
-      await queue.saveQueue();
-      queue.clearAll();
-      await queue.saveQueue();
+    test(
+      'an empty queue leaves an empty file rather than a stale one',
+      () async {
+        final queue = DownloadQueue();
+        queue.enqueue(_track(1));
+        await queue.saveQueue();
+        queue.clearAll();
+        await queue.saveQueue();
 
-      final restored = DownloadQueue();
-      await restored.loadQueue();
-      expect(restored.jobs, isEmpty);
-    });
+        final restored = DownloadQueue();
+        await restored.loadQueue();
+        expect(restored.jobs, isEmpty);
+      },
+    );
   });
 
   group('skipping what is already downloaded', () {
@@ -287,26 +289,29 @@ void main() {
       );
     });
 
-    test('a damaged line does not take the rest of the queue with it', () async {
-      queueFile().writeAsStringSync(
-        [
-          jsonEncode({
-            'track': {'id': 1, 'name': 'A'},
-          }),
-          '{not json at all',
-          jsonEncode({'no track key': true}),
-          '',
-          jsonEncode({
-            'track': {'id': 2, 'name': 'B'},
-          }),
-        ].join('\n'),
-      );
+    test(
+      'a damaged line does not take the rest of the queue with it',
+      () async {
+        queueFile().writeAsStringSync(
+          [
+            jsonEncode({
+              'track': {'id': 1, 'name': 'A'},
+            }),
+            '{not json at all',
+            jsonEncode({'no track key': true}),
+            '',
+            jsonEncode({
+              'track': {'id': 2, 'name': 'B'},
+            }),
+          ].join('\n'),
+        );
 
-      final queue = DownloadQueue();
-      await queue.loadQueue();
+        final queue = DownloadQueue();
+        await queue.loadQueue();
 
-      expect(queue.jobs.map((job) => job.track.id), [1, 2]);
-    });
+        expect(queue.jobs.map((job) => job.track.id), [1, 2]);
+      },
+    );
 
     test('a track already downloaded is not queued again', () async {
       final saved = File('${support.path}${Platform.pathSeparator}have.flac')

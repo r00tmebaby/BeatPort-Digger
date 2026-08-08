@@ -163,9 +163,8 @@ void main() {
           TrackTable(
             tracks: [track(1, 'Song A'), track(2, 'Song B')],
             onPlay: (_) {},
-            playingState: (t) => t.id == playingId
-                ? PlaybackState.playing
-                : PlaybackState.idle,
+            playingState: (t) =>
+                t.id == playingId ? PlaybackState.playing : PlaybackState.idle,
             updates: ticker,
           ),
         ),
@@ -247,7 +246,8 @@ void main() {
       expect(
         ticker.isListenedTo,
         isFalse,
-        reason: 'a leaked listener would keep dead rows doing lookups on '
+        reason:
+            'a leaked listener would keep dead rows doing lookups on '
             'every queue change for the rest of the session',
       );
 

@@ -50,14 +50,13 @@ void main() {
     final plain = _bytes(2048, 5);
     final cipher = _encrypt(plain, key);
 
-    await Future.wait([
-      for (var i = 0; i < 50; i++) pool.decrypt(cipher, key),
-    ]);
+    await Future.wait([for (var i = 0; i < 50; i++) pool.decrypt(cipher, key)]);
 
     expect(
       pool.workerCount,
       3,
-      reason: 'fifty segments must not mean fifty isolates; spawning per '
+      reason:
+          'fifty segments must not mean fifty isolates; spawning per '
           'segment is what stalled the app',
     );
   });

@@ -283,7 +283,8 @@ void main() {
       expect(
         queue.structureRevision,
         structure,
-        reason: 'title and artist ordering must survive a status change '
+        reason:
+            'title and artist ordering must survive a status change '
             'without re-sorting the whole queue',
       );
 
@@ -322,7 +323,8 @@ void main() {
       expect(
         identical(job.titleKey, job.titleKey),
         isTrue,
-        reason: 'lower-casing inside a sort comparator allocates per '
+        reason:
+            'lower-casing inside a sort comparator allocates per '
             'comparison, which dominates a large sort',
       );
     });
@@ -346,7 +348,8 @@ void main() {
       expect(
         queue.jobs.map((job) => job.track.id),
         [3, 4, 1, 2],
-        reason: 'a track already in the queue must still be prioritized, '
+        reason:
+            'a track already in the queue must still be prioritized, '
             'not left where it was',
       );
       expect(queue.jobs.first.status, JobStatus.queued);
@@ -387,7 +390,8 @@ void main() {
       expect(
         stopwatch.elapsedMilliseconds,
         lessThan(500),
-        reason: 'the Downloads list reads this on every rebuild, and '
+        reason:
+            'the Downloads list reads this on every rebuild, and '
             'rebuilds arrive several times a second while downloads run',
       );
     });

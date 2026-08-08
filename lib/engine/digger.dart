@@ -195,9 +195,8 @@ class DiggerCrate {
     if (id is! String || id.isEmpty) return null;
 
     int? asInt(Object? raw) => raw is num ? raw.toInt() : null;
-    String? asString(Object? raw) => raw is String && raw.isNotEmpty
-        ? raw
-        : null;
+    String? asString(Object? raw) =>
+        raw is String && raw.isNotEmpty ? raw : null;
 
     final order = json['order_by'];
     final limit = asInt(json['limit']);

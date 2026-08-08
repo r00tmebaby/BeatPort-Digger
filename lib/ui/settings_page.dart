@@ -234,10 +234,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
         ),
-        const _Section(
-          title: 'Download history',
-          child: _HistorySetting(),
-        ),
+        const _Section(title: 'Download history', child: _HistorySetting()),
         _Section(
           title: 'Organisation',
           child: _OrganisationSetting(queue: queue),

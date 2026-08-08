@@ -190,10 +190,9 @@ void main() {
       await restored.load();
 
       expect(restored.crates, hasLength(20));
-      expect(
-        restored.crates.map((c) => c.subGenreId),
-        [for (var i = 0; i < 20; i++) 100 + i],
-      );
+      expect(restored.crates.map((c) => c.subGenreId), [
+        for (var i = 0; i < 20; i++) 100 + i,
+      ]);
       expect(restored.crates.first.title, 'Dubstep / Sub 0');
     });
 

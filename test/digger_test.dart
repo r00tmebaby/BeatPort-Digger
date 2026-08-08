@@ -217,13 +217,11 @@ void main() {
         }),
       );
 
-      final tracks = await digger
-          .dig([
-            _crate('a', genreId: 1),
-            _crate('b', genreId: 2),
-            _crate('c', genreId: 3),
-          ], today: _today)
-          .toList();
+      final tracks = await digger.dig([
+        _crate('a', genreId: 1),
+        _crate('b', genreId: 2),
+        _crate('c', genreId: 3),
+      ], today: _today).toList();
 
       expect(asked, ['1', '2', '3']);
       expect(tracks.map((t) => t.id), [1, 2, 3]);
@@ -234,9 +232,9 @@ void main() {
         _catalog((_) async => _page(List.generate(100, (i) => i + 1))),
       );
 
-      final tracks = await digger
-          .dig([_crate('a', genreId: 1, limit: 10)], today: _today)
-          .toList();
+      final tracks = await digger.dig([
+        _crate('a', genreId: 1, limit: 10),
+      ], today: _today).toList();
 
       expect(tracks, hasLength(10));
     });
@@ -252,11 +250,15 @@ void main() {
       );
 
       final tracks = await digger
-          .dig([
-            _crate('a', genreId: 1),
-            _crate('b', genreId: 2, genreName: 'Techno'),
-            _crate('c', genreId: 3),
-          ], today: _today, onFailure: (crate, _) => failed.add(crate.title))
+          .dig(
+            [
+              _crate('a', genreId: 1),
+              _crate('b', genreId: 2, genreName: 'Techno'),
+              _crate('c', genreId: 3),
+            ],
+            today: _today,
+            onFailure: (crate, _) => failed.add(crate.title),
+          )
           .toList();
 
       expect(
@@ -275,12 +277,10 @@ void main() {
         }),
       );
 
-      final tracks = await digger
-          .dig([
-            _crate('a', genreId: 1, isExclusive: true),
-            _crate('b', genreId: 2, isExclusive: true),
-          ], today: _today)
-          .toList();
+      final tracks = await digger.dig([
+        _crate('a', genreId: 1, isExclusive: true),
+        _crate('b', genreId: 2, isExclusive: true),
+      ], today: _today).toList();
 
       expect(tracks.map((t) => t.id), [1]);
     });
@@ -298,11 +298,10 @@ void main() {
         if (seen.length == 1) crates.add(_crate('b', genreId: 2));
       }
 
-      expect(
-        seen,
-        [1, 2],
-        reason: 'the bundle is read live so the user can keep building',
-      );
+      expect(seen, [
+        1,
+        2,
+      ], reason: 'the bundle is read live so the user can keep building');
     });
 
     test('a crate removed before its turn is skipped', () async {
@@ -366,11 +365,9 @@ void main() {
         }),
       );
 
-      final tracks = await digger
-          .dig([
-            _crate('a', genreId: 1, limit: unlimitedCrateLimit, windowDays: 3),
-          ], today: _today)
-          .toList();
+      final tracks = await digger.dig([
+        _crate('a', genreId: 1, limit: unlimitedCrateLimit, windowDays: 3),
+      ], today: _today).toList();
 
       expect(tracks, isNotEmpty);
       expect(
@@ -389,15 +386,13 @@ void main() {
         }),
       );
 
-      await digger
-          .dig([_crate('a', genreId: 1, limit: 50)], today: _today)
-          .toList();
+      await digger.dig([
+        _crate('a', genreId: 1, limit: 50),
+      ], today: _today).toList();
 
-      expect(
-        probes,
-        ['50'],
-        reason: 'no count probe, just one page of the requested size',
-      );
+      expect(probes, [
+        '50',
+      ], reason: 'no count probe, just one page of the requested size');
     });
 
     test('a crate can be stopped without ending the bundle', () async {
@@ -411,10 +406,14 @@ void main() {
         }),
       );
 
-      await for (final track in digger.dig([
-        _crate('a', genreId: 1, limit: 500),
-        _crate('b', genreId: 2, limit: 500),
-      ], today: _today, control: control)) {
+      await for (final track in digger.dig(
+        [
+          _crate('a', genreId: 1, limit: 500),
+          _crate('b', genreId: 2, limit: 500),
+        ],
+        today: _today,
+        control: control,
+      )) {
         seen.add(track.id!);
         if (seen.length == 3) control.skip('a');
       }
@@ -443,11 +442,15 @@ void main() {
       );
 
       final tracks = await digger
-          .dig([
-            _crate('a', genreId: 1),
-            _crate('b', genreId: 2),
-            _crate('c', genreId: 3),
-          ], today: _today, control: control)
+          .dig(
+            [
+              _crate('a', genreId: 1),
+              _crate('b', genreId: 2),
+              _crate('c', genreId: 3),
+            ],
+            today: _today,
+            control: control,
+          )
           .toList();
 
       expect(asked, ['1', '3']);
