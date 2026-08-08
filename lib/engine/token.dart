@@ -3,6 +3,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'atomic_write.dart';
+
 const String publicClientId = 'ryZ8LuyQVPqbK2mBX2Hwt4qSMtnWuTYSqBPO92yQ';
 
 const int refreshLeeway = 300;
@@ -113,9 +115,9 @@ class FileTokenStore implements TokenStore {
 
   @override
   Future<void> write(TokenPair token) async {
-    final file = File(path);
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(token.toJson()));
+    // Atomic: a token file truncated mid-write reads as no session at all,
+    // which forces a fresh login and burns the refresh chain.
+    await writeFileAtomically(File(path), jsonEncode(token.toJson()));
   }
 
   @override

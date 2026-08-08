@@ -250,6 +250,115 @@ void main() {
     });
   });
 
+  group('the download folder', () {
+    test('survives a restart', () async {
+      final queue = DownloadQueue();
+      await queue.setDestination(r'G:\');
+
+      final restored = DownloadQueue();
+      await restored.loadSettings();
+
+      expect(restored.destinationOverride, r'G:\');
+      expect((await restored.destination()).path, r'G:\');
+    });
+
+    test('resolution follows the current override, never a cache', () async {
+      // The startup race: the settings page asks for the destination before
+      // the settings have loaded. Whatever got cached then must not shadow
+      // the override once it arrives, because downloads resolve their folder
+      // through this same call at download time.
+      final saver = DownloadQueue();
+      await saver.setDestination(r'G:\');
+
+      final queue = DownloadQueue();
+      await queue.loadSettings();
+      expect((await queue.destination()).path, r'G:\');
+
+      await queue.setDestination(r'H:\Music');
+      expect((await queue.destination()).path, r'H:\Music');
+    });
+
+    test('a torn settings write cannot lose the folder', () async {
+      final queue = DownloadQueue();
+      await queue.setDestination(r'G:\');
+
+      // The atomic writer leaves the previous good file when interrupted;
+      // the stale sibling must not confuse the next load or save.
+      final settings = File(
+        '${support.path}${Platform.pathSeparator}download_settings.json',
+      );
+      File('${settings.path}.tmp').writeAsStringSync('{"quality":"hi');
+
+      final restored = DownloadQueue();
+      await restored.loadSettings();
+      expect(restored.destinationOverride, r'G:\');
+
+      await restored.saveSettings();
+      final reread = DownloadQueue();
+      await reread.loadSettings();
+      expect(reread.destinationOverride, r'G:\');
+    });
+  });
+
+  group('history durability', () {
+    test('saves atomically and leaves no temp behind', () async {
+      writeHistoryFile([
+        {
+          'track_id': 1,
+          'title': 'Track 1',
+          'artists': 'Artist',
+          'path': '${support.path}${Platform.pathSeparator}a.flac',
+          'quality': 'FLAC',
+          'completed_at': '2026-08-01T12:00:00.000',
+        },
+      ]);
+      final queue = DownloadQueue();
+      await queue.loadHistory();
+      expect(queue.historyCount, 1);
+
+      await queue.clearHistory();
+
+      final file = File(
+        '${support.path}${Platform.pathSeparator}download_history.json',
+      );
+      expect(file.readAsStringSync(), '[]');
+      expect(File('${file.path}.tmp').existsSync(), isFalse);
+
+      final restored = DownloadQueue();
+      await restored.loadHistory();
+      expect(restored.historyCount, 0);
+    });
+
+    test('a large history round-trips through the chunked writer', () async {
+      writeHistoryFile([
+        for (var i = 0; i < 5000; i++)
+          {
+            'track_id': i,
+            'title': 'Track $i',
+            'artists': 'Artist',
+            'path': '${support.path}${Platform.pathSeparator}$i.flac',
+            'quality': 'FLAC',
+            'completed_at': '2026-08-01T12:00:00.000',
+          },
+      ]);
+
+      final queue = DownloadQueue();
+      await queue.loadHistory();
+      expect(queue.historyCount, 5000);
+
+      // Force a full save through the chunked encoder and read it back.
+      await queue.verifyHistory();
+      await queue.removeMissingHistory();
+      final restored = DownloadQueue();
+      await restored.loadHistory();
+      expect(
+        restored.historyCount,
+        0,
+        reason: 'every entry pointed at a missing file',
+      );
+    });
+  });
+
   group('restoring', () {
     test('a job that was mid-download comes back queued', () async {
       // Running jobs are persisted with no status marker, exactly as queued

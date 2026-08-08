@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'atomic_write.dart';
 import 'catalog.dart';
 import 'models.dart';
 
@@ -128,9 +129,7 @@ class ReferenceCache {
 
   Future<void> _save(ReferenceData data) async {
     try {
-      final file = await _file();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(jsonEncode(data.toJson()));
+      await writeFileAtomically(await _file(), jsonEncode(data.toJson()));
     } on Object {
       // Best-effort cache write; a failed save just means we refetch later.
     }

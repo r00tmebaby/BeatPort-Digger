@@ -1,5 +1,6 @@
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -25,31 +26,48 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String? _resolvedPath;
 
+  /// The override value [_resolvedPath] was computed for. A sentinel rather
+  /// than null, because null is itself a valid override meaning "default".
+  Object? _resolvedFor = _neverResolved;
+  static const Object _neverResolved = Object();
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      final queue = context.read<DownloadQueue>();
-      await queue.checkFfmpeg();
-      final path = await queue.destinationPath();
-      if (mounted) setState(() => _resolvedPath = path);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<DownloadQueue>().checkFfmpeg();
     });
+  }
+
+  /// Recomputes the shown folder whenever the override changes.
+  ///
+  /// This page is built at startup inside the IndexedStack, so resolving the
+  /// path once in initState raced the settings load and usually lost: the
+  /// label showed the C:\ default even though the saved folder loaded a
+  /// moment later and every download used it correctly. Keying the
+  /// resolution to the selected override means the label follows the truth.
+  void _syncResolvedPath(DownloadQueue queue, String? override) {
+    if (!identical(_resolvedFor, _neverResolved) && _resolvedFor == override) {
+      return;
+    }
+    _resolvedFor = override;
+    unawaited(() async {
+      final path = await queue.destinationPath();
+      if (mounted && _resolvedFor == override) {
+        setState(() => _resolvedPath = path);
+      }
+    }());
   }
 
   Future<void> _pickFolder(DownloadQueue queue) async {
     final chosen = await getDirectoryPath();
     if (chosen == null) return;
+    // The label updates by itself: setDestination notifies, the select on
+    // the override fires, and the path re-resolves.
     await queue.setDestination(chosen);
-    final path = await queue.destinationPath();
-    if (mounted) setState(() => _resolvedPath = path);
   }
 
-  Future<void> _resetFolder(DownloadQueue queue) async {
-    await queue.setDestination(null);
-    final path = await queue.destinationPath();
-    if (mounted) setState(() => _resolvedPath = path);
-  }
+  Future<void> _resetFolder(DownloadQueue queue) => queue.setDestination(null);
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +85,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final colourByStatus = context.select<DownloadQueue, bool>(
       (q) => q.colourByStatus,
     );
+    final destinationOverride = context.select<DownloadQueue, String?>(
+      (q) => q.destinationOverride,
+    );
+    _syncResolvedPath(queue, destinationOverride);
     final theme = Theme.of(context);
 
     return ListView(
@@ -176,7 +198,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       icon: const Icon(Icons.folder_open, size: 18),
                       label: const Text('Change'),
                     ),
-                    if (queue.destinationOverride != null) ...[
+                    if (destinationOverride != null) ...[
                       const SizedBox(width: 8),
                       TextButton(
                         onPressed: () => _resetFolder(queue),
@@ -188,7 +210,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                queue.destinationOverride == null
+                destinationOverride == null
                     ? (Platform.isAndroid
                           ? 'Saved to Music/BeatPort Digger, visible in the Files '
                                 'app and to other apps.'

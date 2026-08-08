@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../engine/atomic_write.dart';
 import '../engine/digger.dart';
 import 'downloads.dart';
 import 'session.dart';
@@ -119,9 +120,8 @@ class DiggerRunner extends ChangeNotifier {
 
   Future<void> save() async {
     try {
-      final file = await _bundleFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
+      await writeFileAtomically(
+        await _bundleFile(),
         jsonEncode({
           'run_on_start': runOnStart,
           'crates': [for (final crate in crates) crate.toJson()],

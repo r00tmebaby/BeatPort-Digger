@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../engine/atomic_write.dart';
 import '../engine/catalog.dart';
 import '../engine/download.dart';
 import '../engine/download_history.dart';
@@ -505,9 +506,11 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<void> saveSettings() async {
     try {
-      final file = await _settingsFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
+      // Atomic so a kill mid-write cannot truncate the file: settings lost
+      // that way would silently come back as defaults, moving the download
+      // folder without anyone having changed it.
+      await writeFileAtomically(
+        await _settingsFile(),
         jsonEncode({
           'quality': quality.value,
           'max_concurrent': _maxConcurrent,
@@ -581,20 +584,59 @@ class DownloadQueue extends ChangeNotifier {
     await _saveHistory();
   }
 
+  bool _historyDirty = false;
+  bool _historySaving = false;
+
+  /// Marks the history as needing a save without resetting a pending timer.
+  ///
+  /// The old debounce re-armed itself on every completion, so a steady rate
+  /// of finished downloads pushed the save back indefinitely: with sixty-four
+  /// tracks completing continuously the file could go unwritten for the
+  /// whole run.
   void _scheduleHistorySave() {
-    _historyFlush?.cancel();
-    _historyFlush = Timer(const Duration(milliseconds: 500), _saveHistory);
+    _historyDirty = true;
+    if (!(_historyFlush?.isActive ?? false)) {
+      _historyFlush = Timer(
+        const Duration(milliseconds: 500),
+        () => unawaited(_saveHistory()),
+      );
+    }
     _notify();
   }
 
+  /// Writes the history, coalescing overlapping calls. Changes made while a
+  /// save runs trigger another pass rather than being lost.
   Future<void> _saveHistory() async {
     _historyFlush?.cancel();
+    _historyDirty = true;
+    if (_historySaving) return;
+    _historySaving = true;
     try {
-      final file = await _historyFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode([for (final e in _history.values) e.toJson()]),
-      );
+      while (_historyDirty) {
+        _historyDirty = false;
+        await _writeHistory();
+      }
+    } finally {
+      _historySaving = false;
+    }
+  }
+
+  Future<void> _writeHistory() async {
+    try {
+      // Encoded in slices with yields: a six-figure history encoded in one
+      // jsonEncode call blocks the isolate for the whole pass. The write
+      // itself is atomic, because this file was once caught truncated to
+      // zero bytes mid-write - and it is the skip-list for every download
+      // ever made, which is not a file to lose.
+      final entries = _history.values.toList();
+      final buffer = StringBuffer('[');
+      for (var i = 0; i < entries.length; i++) {
+        if (i > 0) buffer.write(',');
+        buffer.write(jsonEncode(entries[i].toJson()));
+        if (i % 2000 == 1999) await Future<void>.delayed(Duration.zero);
+      }
+      buffer.write(']');
+      await writeFileAtomically(await _historyFile(), buffer.toString());
     } on Object {
       // Best-effort history save; ignore write failures (e.g. read-only fs).
     }
@@ -1128,7 +1170,9 @@ class DownloadQueue extends ChangeNotifier {
     _disposed = true;
     _notifyTimer?.cancel();
 
-    if (_historyFlush?.isActive ?? false) unawaited(_saveHistory());
+    if (_historyDirty || (_historyFlush?.isActive ?? false)) {
+      unawaited(_saveHistory());
+    }
     _historyFlush?.cancel();
 
     // Best-effort final flush. It may not finish if the process is going
