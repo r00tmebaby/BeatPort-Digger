@@ -48,8 +48,24 @@ class Authenticator {
   TokenPair? token;
 
   Future<bool>? _refreshing;
+  int _generation = 0;
 
   bool get isAuthenticated => token != null;
+
+  /// Bumped every time a new token is installed. A caller that saw generation
+  /// N and then hits a 401 can ask [refresh] to act only if the token is still
+  /// the one it used, which stops a burst of concurrent 401s from each
+  /// spending a single-use refresh token on the same rotation.
+  int get tokenGeneration => _generation;
+
+  /// True once Beatport has rejected the refresh token outright. The session
+  /// cannot be recovered without a fresh login, as distinct from a refresh
+  /// that merely failed to reach the server.
+  bool sessionExpired = false;
+
+  /// Invoked when a live session dies mid-use so the app can send the user
+  /// back to the login screen instead of failing every request from then on.
+  void Function()? onSessionExpired;
 
   Future<TokenPair?> loadCached({String? username, String? password}) async {
     final cached = await _store.read();
@@ -85,7 +101,15 @@ class Authenticator {
   /// Beatport's refresh tokens are single-use, so a second request that
   /// raced ahead with the old token would be rejected and read as a fully
   /// expired session even though the first refresh actually succeeded.
-  Future<bool> refresh() async {
+  ///
+  /// Pass [ifGeneration] with the value [tokenGeneration] had when the failing
+  /// request was sent. If the token has rotated since, there is nothing to do
+  /// and the caller should simply retry with the token now in place; the
+  /// in-flight guard alone does not cover that, because the winning refresh
+  /// may already have finished by the time the loser notices its 401.
+  Future<bool> refresh({int? ifGeneration}) async {
+    if (ifGeneration != null && ifGeneration != _generation) return true;
+
     final inFlight = _refreshing;
     if (inFlight != null) return inFlight;
 
@@ -116,6 +140,7 @@ class Authenticator {
 
   Future<void> logOut() async {
     token = null;
+    sessionExpired = false;
     await _store.clear();
   }
 
@@ -130,9 +155,25 @@ class Authenticator {
       });
 
       return _persist(renewed.stamped(loginId: current.loginId));
-    } on BeatportException {
+    } on BeatportException catch (exception) {
+      // 400 (invalid_grant) or 401 means the refresh token itself was
+      // rejected, so nothing short of a new login will help; drop the dead
+      // credentials rather than keep answering every later request with
+      // "session expired". Any other status is a server or gateway problem
+      // that may well clear, so the token is kept for the next attempt.
+      if (exception.status == 400 || exception.status == 401) {
+        await _abandonSession();
+      }
       return null;
     }
+  }
+
+  Future<void> _abandonSession() async {
+    final wasLive = token != null;
+    token = null;
+    sessionExpired = true;
+    await _store.clear();
+    if (wasLive) onSessionExpired?.call();
   }
 
   Future<String> _login(String username, String password) async {
@@ -217,6 +258,8 @@ class Authenticator {
 
   Future<TokenPair> _persist(TokenPair value) async {
     token = value;
+    _generation += 1;
+    sessionExpired = false;
     await _store.write(value);
     return value;
   }

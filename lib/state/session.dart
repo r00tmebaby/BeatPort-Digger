@@ -22,9 +22,19 @@ class Session extends ChangeNotifier {
     _auth = Authenticator(
       httpClient: _http,
       store: store ?? SecureTokenStore(),
-    );
+    )..onSessionExpired = _handleSessionExpired;
     catalog = Catalog(BeatportClient(auth: _auth, httpClient: _http));
     _reference = ReferenceCache(catalog);
+  }
+
+  /// Beatport rejected the refresh token, so nothing short of a new login will
+  /// work. Without this the app kept a dead token and answered every later
+  /// request with "session expired" while still showing a signed-in UI.
+  void _handleSessionExpired() {
+    if (status != SessionStatus.signedIn) return;
+    status = SessionStatus.signedOut;
+    error = 'Your Beatport session expired. Sign in again to continue.';
+    notifyListeners();
   }
 
   final http.Client _http;
@@ -42,6 +52,8 @@ class Session extends ChangeNotifier {
   List<Genre> get genres => _genres;
 
   Map<int, List<Named>> _subGenres = const {};
+
+  Map<int, List<Named>> get subGenres => _subGenres;
 
   List<Named>? subGenresFor(int genreId) => _subGenres[genreId];
 

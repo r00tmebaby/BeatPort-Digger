@@ -5,15 +5,16 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 
 import 'catalog.dart';
+import 'decrypt_pool.dart';
 import 'errors.dart';
 import 'ffmpeg.dart';
 import 'hls.dart';
 import 'models.dart';
 import 'naming.dart';
+import 'request_limiter.dart';
 
 enum AudioQuality {
   lossless('lossless', 'FLAC'),
@@ -36,10 +37,30 @@ const String defaultFileTemplate = '{artists} - {title}';
 
 const int segmentWindow = 6;
 
-/// Runs on a worker isolate via [compute]; must stay a plain top-level
-/// function (no captured state) for isolate messaging to accept it.
-Uint8List _decryptSegmentPayload((Uint8List, StreamKey) args) =>
-    decryptSegment(args.$1, args.$2);
+/// Segment fetches allowed across all downloads at once.
+///
+/// [segmentWindow] is per track, so at high concurrency the totals stop making
+/// sense: sixty-four tracks would put nearly four hundred requests in flight
+/// and hold every one of their bodies in memory at the same time. This caps
+/// the whole app regardless of how many tracks are running.
+const int totalSegmentWindow = 24;
+
+/// Remuxes allowed at once.
+///
+/// Each one spawns an ffmpeg process, which is expensive to create, more so on
+/// Windows. A queue of short tracks finishes them in bursts, so without a cap
+/// the app spends its time spawning processes. The work itself is a stream
+/// copy, so a small number keeps up easily.
+const int maxParallelRemux = 3;
+
+/// Consecutive refusals from the download endpoint before the downloader stops
+/// asking. An account without download entitlement refuses every track, and
+/// that doomed request doubles the API round-trips each track needs.
+const int entitlementRefusalLimit = 5;
+
+/// How often to try the download endpoint again after giving up on it, in
+/// tracks, so a subscription that starts working is picked up.
+const int entitlementRecheckInterval = 100;
 
 final RegExp _illegalPathChars = RegExp(r'[<>:"|?*\\/\x00-\x1f]');
 final RegExp _whitespaceRun = RegExp(r'\s+');
@@ -150,17 +171,46 @@ class Downloader {
     required this.catalog,
     http.Client? httpClient,
     Ffmpeg? ffmpeg,
+    DecryptPool? decryptPool,
     this.segmentConcurrency = segmentWindow,
+    int totalSegments = totalSegmentWindow,
+    int parallelRemux = maxParallelRemux,
   }) : _http = httpClient ?? http.Client(),
-       ffmpeg = ffmpeg ?? Ffmpeg();
+       ffmpeg = ffmpeg ?? Ffmpeg(),
+       decrypt = decryptPool ?? DecryptPool(),
+       _segments = RequestLimiter(totalSegments),
+       _remuxes = RequestLimiter(parallelRemux);
+
+  /// Caps segment fetches across every download at once, so raising the track
+  /// concurrency does not multiply the requests and buffers in flight.
+  final RequestLimiter _segments;
+
+  /// Caps concurrent ffmpeg processes.
+  final RequestLimiter _remuxes;
+
+  /// Set once the account has refused enough downloads that asking again is
+  /// clearly wasted. Rechecked periodically in case entitlement changes.
+  int _entitlementRefusals = 0;
+  int _sinceEntitlementCheck = 0;
+
+  bool get _skipDirectDownload =>
+      _entitlementRefusals >= entitlementRefusalLimit &&
+      _sinceEntitlementCheck < entitlementRecheckInterval;
 
   final Catalog catalog;
   final http.Client _http;
   final Ffmpeg ffmpeg;
 
+  /// Shared across every download this downloader runs, so the isolates are
+  /// spawned once rather than per segment.
+  final DecryptPool decrypt;
+
   final int segmentConcurrency;
 
-  void close() => _http.close();
+  void close() {
+    _http.close();
+    decrypt.close();
+  }
 
   Future<DownloadResult> downloadTrack(
     Track track,
@@ -182,9 +232,21 @@ class Downloader {
     );
     directory = target;
     BeatportException? refusal;
-    if (!quality.usesStream) {
+
+    // An account without download entitlement refuses every single track, and
+    // that refusal costs a round-trip each time. Once it has said no often
+    // enough, stop asking and go straight to the stream; try again every so
+    // often so an upgraded subscription is noticed.
+    if (_skipDirectDownload) {
+      _sinceEntitlementCheck += 1;
+      refusal = BeatportException(
+        403,
+        'account has no download entitlement for this quality',
+      );
+    } else if (!quality.usesStream) {
+      _sinceEntitlementCheck = 0;
       try {
-        return await _downloadDirect(
+        final result = await _downloadDirect(
           id,
           quality,
           directory,
@@ -192,8 +254,15 @@ class Downloader {
           onProgress: onProgress,
           cancellation: cancellation,
         );
+        _entitlementRefusals = 0;
+        return result;
       } on BeatportException catch (exception) {
         refusal = exception;
+        if (exception.status == 403) {
+          _entitlementRefusals += 1;
+        } else {
+          _entitlementRefusals = 0;
+        }
       }
     }
 
@@ -547,24 +616,32 @@ class Downloader {
   }
 
   Future<Uint8List> _fetchSegment(Uri url, int index, StreamKey? key) async {
-    final response = await _http.get(url);
+    // Gated app-wide, not per track: the body of every segment in flight is
+    // held in memory until it is decrypted and written.
+    final response = await _segments.run(() => _http.get(url));
     if (response.statusCode != 200) {
       throw BeatportException(
         response.statusCode,
         'segment ${index + 1} failed',
       );
     }
-    final payload = Uint8List.fromList(response.bodyBytes);
+
+    // bodyBytes is already a Uint8List; copying it again just to hand it on
+    // is pure waste at this volume.
+    final payload = response.bodyBytes;
     if (key == null) return payload;
 
-    // AES-CBC decryption is pure CPU work with no natural await point; doing
-    // it inline on the UI isolate is what froze the app once several tracks
-    // were downloading segments at once. compute() runs it on a worker
-    // isolate instead, so the frame scheduler and touch input stay free.
-    return compute(_decryptSegmentPayload, (payload, key));
+    // AES-CBC decryption is pure CPU work with no natural await point, so it
+    // cannot run on the UI isolate. It goes to a standing pool rather than a
+    // fresh isolate per segment: at this concurrency the spawning alone was
+    // enough to stall the app.
+    return decrypt.decrypt(payload, key);
   }
 
-  Future<void> _remux(
+  Future<void> _remux(String tool, File input, File output, {Track? track}) =>
+      _remuxes.run(() => _runRemux(tool, input, output, track: track));
+
+  Future<void> _runRemux(
     String tool,
     File input,
     File output, {

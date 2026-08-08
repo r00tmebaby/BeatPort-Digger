@@ -13,9 +13,16 @@ class BrowsePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Same reasoning as the top-level nav: the tabs stay built to keep their
+    // results and scroll position, so the ones out of sight get their tickers
+    // switched off rather than animating unseen.
     return IndexedStack(
       index: index,
-      children: const [SearchTab(), HarmonicPage(), LinkTab()],
+      children: [
+        TickerMode(enabled: index == 0, child: const SearchTab()),
+        TickerMode(enabled: index == 1, child: const HarmonicPage()),
+        TickerMode(enabled: index == 2, child: const LinkTab()),
+      ],
     );
   }
 }

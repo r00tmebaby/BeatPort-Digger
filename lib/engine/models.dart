@@ -26,6 +26,12 @@ class Named {
     name: _string(json['name']),
     slug: _string(json['slug']),
   );
+
+  Map<String, dynamic> toJson() => {
+    if (id != null) 'id': id,
+    if (name != null) 'name': name,
+    if (slug != null) 'slug': slug,
+  };
 }
 
 class Key {
@@ -42,6 +48,13 @@ class Key {
     camelotNumber: _int(json['camelot_number']),
     camelotLetter: _string(json['camelot_letter']),
   );
+
+  Map<String, dynamic> toJson() => {
+    if (id != null) 'id': id,
+    if (name != null) 'name': name,
+    if (camelotNumber != null) 'camelot_number': camelotNumber,
+    if (camelotLetter != null) 'camelot_letter': camelotLetter,
+  };
 
   String get camelot {
     final number = camelotNumber;
@@ -156,6 +169,38 @@ class Track {
       isPreOrder: json['pre_order'] == true,
     );
   }
+
+  /// Emits the shape [Track.fromJson] reads, so a persisted download queue
+  /// restores through the same parser as a live API response instead of a
+  /// second, parallel format that could drift from it. Empty fields are left
+  /// out: a queue can hold six figures of these.
+  Map<String, dynamic> toJson() => {
+    if (id != null) 'id': id,
+    if (name != null) 'name': name,
+    if (mixName != null) 'mix_name': mixName,
+    if (slug != null) 'slug': slug,
+    if (isrc != null) 'isrc': isrc,
+    if (bpm != null) 'bpm': bpm,
+    if (length != null) 'length': length,
+    if (publishDate != null) 'publish_date': publishDate,
+    if (newReleaseDate != null) 'new_release_date': newReleaseDate,
+    if (key != null) 'key': key!.toJson(),
+    if (genre != null) 'genre': genre!.toJson(),
+    if (subGenre != null) 'sub_genre': subGenre!.toJson(),
+    if (artists.isNotEmpty)
+      'artists': [for (final artist in artists) artist.toJson()],
+    if (labelName.isNotEmpty)
+      'release': {
+        'label': {'name': labelName},
+      },
+    if (sampleUrl != null) 'sample_url': sampleUrl,
+    if (isHype) 'is_hype': true,
+    if (isExclusive) 'exclusive': true,
+    if (isClassic) 'is_classic': true,
+    if (isDjEdit) 'is_dj_edit': true,
+    if (isExplicit) 'is_explicit': true,
+    if (isPreOrder) 'pre_order': true,
+  };
 
   List<String> get badges => [
     if (isHype) 'Hype',

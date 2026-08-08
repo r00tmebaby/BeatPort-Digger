@@ -8,6 +8,14 @@ const int resultWindow = 10000;
 
 const int safeMaxPerPage = 2000;
 
+/// Page size for walks that fill the download queue.
+///
+/// The visible result page is sized for reading, and defaults to 20. Walking
+/// the 10,000 row window at that size is 500 sequential requests, so every
+/// extra request is another chance to trip a rate limit and end the walk
+/// early. At 100 the same walk is 100 requests.
+const int discoveryPerPage = 100;
+
 const int bpmFloor = 0;
 const int bpmCeiling = 1000;
 
@@ -31,7 +39,8 @@ String validateOrderBy(String orderBy) {
   return orderBy;
 }
 
-String _isoDate(DateTime date) =>
+/// Renders a date the way Beatport's date-range filters expect it.
+String isoDate(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-'
     '${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
@@ -113,7 +122,7 @@ class TrackQuery {
   );
 
   TrackQuery dated(DateTime start, DateTime end) =>
-      copy()..newReleaseDate = '${_isoDate(start)}:${_isoDate(end)}';
+      copy()..newReleaseDate = '${isoDate(start)}:${isoDate(end)}';
 
   static String? _join(List<Object>? values) =>
       (values == null || values.isEmpty) ? null : values.join(',');
@@ -148,7 +157,7 @@ class ExportWindow {
   final bool truncated;
 
   String get label =>
-      low == high ? _isoDate(low) : '${_isoDate(low)} .. ${_isoDate(high)}';
+      low == high ? isoDate(low) : '${isoDate(low)} .. ${isoDate(high)}';
 }
 
 class Catalog {

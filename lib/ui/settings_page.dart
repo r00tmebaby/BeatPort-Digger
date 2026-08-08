@@ -53,7 +53,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final queue = context.watch<DownloadQueue>();
+    // Watching the whole queue rebuilt this entire page every time a job
+    // changed state, several times a second during a large download. None of
+    // these settings depend on that, so each one listens for itself and job
+    // churn no longer reaches the page at all.
+    final queue = context.read<DownloadQueue>();
+    final quality = context.select<DownloadQueue, AudioQuality>(
+      (q) => q.quality,
+    );
+    final concurrent = context.select<DownloadQueue, int>(
+      (q) => q.maxConcurrent,
+    );
+    final colourByStatus = context.select<DownloadQueue, bool>(
+      (q) => q.colourByStatus,
+    );
     final theme = Theme.of(context);
 
     return ListView(
@@ -67,7 +80,7 @@ class _SettingsPageState extends State<SettingsPage> {
               SizedBox(
                 width: 300,
                 child: DropdownButtonFormField<AudioQuality>(
-                  initialValue: queue.quality,
+                  initialValue: quality,
                   isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Quality',
@@ -104,12 +117,12 @@ class _SettingsPageState extends State<SettingsPage> {
               SizedBox(
                 width: 300,
                 child: DropdownButtonFormField<int>(
-                  initialValue: queue.maxConcurrent,
+                  initialValue: concurrent,
                   decoration: const InputDecoration(
                     labelText: 'Parallel downloads',
                     border: OutlineInputBorder(),
                   ),
-                  items: const [1, 2, 4, 6, 8, 12, 16]
+                  items: const [1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64]
                       .map(
                         (n) => DropdownMenuItem(
                           value: n,
@@ -124,10 +137,16 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Each track also fetches up to $segmentWindow stream segments '
-                'at once, so the connection count is roughly '
-                '${queue.maxConcurrent * segmentWindow} at this setting. '
-                'Lower it if downloads start failing.',
+                'A track the account can download outright is one connection, '
+                'so this is $concurrent connections at FLAC. A track that '
+                'falls back to the stream fetches $segmentWindow segments at '
+                'once and then runs ffmpeg, so a queue of those is nearer '
+                '${concurrent * segmentWindow} connections and up to '
+                '$concurrent ffmpeg processes.\n\n'
+                'Catalog requests are throttled separately, so raising this '
+                'does not push harder on the API. Past the point where your '
+                'connection is saturated it stops helping: the same bandwidth '
+                'is split more ways and stalled transfers start timing out.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -193,7 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                value: queue.colourByStatus,
+                value: colourByStatus,
                 onChanged: (value) => queue.statusColours = value,
                 title: const Text('Colour rows by download status'),
                 subtitle: const Text(
@@ -201,7 +220,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   'without reading the icon.',
                 ),
               ),
-              if (queue.colourByStatus) ...[
+              if (colourByStatus) ...[
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 10,
@@ -215,9 +234,9 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
         ),
-        _Section(
+        const _Section(
           title: 'Download history',
-          child: _HistorySetting(queue: queue),
+          child: _HistorySetting(),
         ),
         _Section(
           title: 'Organisation',
@@ -484,15 +503,14 @@ class _PreviewSettingState extends State<_PreviewSetting> {
 }
 
 class _HistorySetting extends StatelessWidget {
-  const _HistorySetting({required this.queue});
-
-  final DownloadQueue queue;
+  const _HistorySetting();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final total = queue.historyCount;
-    final missing = queue.missingCount;
+    final queue = context.read<DownloadQueue>();
+    final total = context.select<DownloadQueue, int>((q) => q.historyCount);
+    final missing = context.select<DownloadQueue, int>((q) => q.missingCount);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

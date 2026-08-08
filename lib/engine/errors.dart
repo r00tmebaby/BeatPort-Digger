@@ -17,6 +17,55 @@ class AuthException extends BeatportException {
   AuthException(super.status, [super.message]);
 }
 
+/// Statuses that are worth sending again after a pause: the request was not
+/// wrong, the server was busy or briefly unhealthy.
+const Set<int> retryableStatuses = {429, 500, 502, 503, 504};
+
+/// Words that mark a refusal as being about the bearer token itself.
+const List<String> _credentialHints = [
+  'token',
+  'credential',
+  'not authenticated',
+  'authentication',
+  'signature',
+];
+
+/// Words that mark a refusal as being about what the account may have. These
+/// win over [_credentialHints], so a message like "your subscription expired"
+/// is never mistaken for an expired token.
+const List<String> _entitlementHints = [
+  'subscription',
+  'permission',
+  'not allowed',
+  'entitle',
+  'region',
+  'territory',
+];
+
+/// Decides whether a refused response is about the caller's token, as opposed
+/// to what the account is allowed to have.
+///
+/// Beatport answers both cases with a 4xx, and the difference is expensive:
+/// its refresh tokens are single-use, so refreshing on an entitlement refusal
+/// spends one for nothing. A bulk download produces a steady stream of 403s
+/// for tracks the account does not own, which is enough to churn through the
+/// refresh chain and leave the session unrecoverable.
+///
+/// A 401 is always taken at face value. A 403 counts only when it carries an
+/// authentication challenge or says outright that the token is the problem;
+/// anything else is treated as an entitlement refusal, which the download path
+/// already handles by falling back to the sample.
+bool isCredentialFailure(int status, String body, [String? wwwAuthenticate]) {
+  if (status == 401) return true;
+  if (status != 403) return false;
+
+  final message = errorMessage(body).toLowerCase();
+  if (_entitlementHints.any(message.contains)) return false;
+  if (wwwAuthenticate != null && wwwAuthenticate.trim().isNotEmpty) return true;
+  if (message.isEmpty) return false;
+  return _credentialHints.any(message.contains);
+}
+
 String errorMessage(String body) {
   Object? payload;
   try {

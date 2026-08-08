@@ -1,6 +1,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../engine/download_history.dart';
 import '../../engine/models.dart';
@@ -157,6 +158,14 @@ int _keyRank(Track track) {
   return number * 2 + (letter.toUpperCase() == 'A' ? 0 : 1);
 }
 
+String _clipboardText(Track track) {
+  final artists = track.artistNames.trim();
+  final title = track.title.trim();
+  if (artists.isEmpty) return title;
+  if (title.isEmpty) return artists;
+  return '$artists - $title';
+}
+
 List<Track> sortTracks(List<Track> tracks, TrackSort sort, bool ascending) {
   if (sort == TrackSort.none) return tracks;
 
@@ -202,6 +211,7 @@ class TrackTable extends StatefulWidget {
     this.rankFor,
     this.rankLabel,
     this.historyMarkFor,
+    this.updates,
   });
 
   final List<Track> tracks;
@@ -226,8 +236,89 @@ class TrackTable extends StatefulWidget {
 
   final HistoryMark Function(Track)? historyMarkFor;
 
+  /// Notifies when the answers of [statusFor], [historyMarkFor] or
+  /// [playingState] may have changed, e.g. the download queue and the preview
+  /// player merged into one listenable.
+  ///
+  /// Rows listen to this individually and repaint only when their own values
+  /// actually changed. Without it the table has to be rebuilt from outside for
+  /// every change anywhere - and the sources notify constantly: the queue on
+  /// every job transition, the player on every position tick. Rebuilding
+  /// hundreds of rows, and re-sorting, at that rate is what made the app drag
+  /// while downloading; with this wired the table itself never rebuilds for
+  /// state churn at all.
+  final Listenable? updates;
+
   @override
   State<TrackTable> createState() => _TrackTableState();
+}
+
+/// What one row shows of the app's mutable state. Compared by value after
+/// every [TrackTable.updates] tick to decide whether that row repaints, so it
+/// must stay cheap to compute and to compare.
+typedef _RowState = (JobStatus?, HistoryMark, PlaybackState);
+
+/// One row that follows [TrackTable.updates] on its own.
+///
+/// Listening per row looks extravagant, but only built rows exist - a lazy
+/// list keeps a couple of screens' worth alive - so this is a few dozen
+/// listeners, each doing two map lookups per notification and repainting only
+/// on a real change. Progress bytes and play position pass through here as
+/// "nothing changed" and cost no paint.
+class _LiveRow extends StatefulWidget {
+  const _LiveRow({
+    required this.updates,
+    required this.rowState,
+    required this.builder,
+  });
+
+  final Listenable? updates;
+  final _RowState Function() rowState;
+  final WidgetBuilder builder;
+
+  @override
+  State<_LiveRow> createState() => _LiveRowState();
+}
+
+class _LiveRowState extends State<_LiveRow> {
+  // Assigned in initState rather than as a late initializer: late runs on
+  // first access, which would be inside _check after the state has already
+  // moved, making every comparison see two fresh values and never repaint.
+  late _RowState _last;
+
+  @override
+  void initState() {
+    super.initState();
+    _last = widget.rowState();
+    widget.updates?.addListener(_check);
+  }
+
+  @override
+  void didUpdateWidget(_LiveRow old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.updates, widget.updates)) {
+      old.updates?.removeListener(_check);
+      widget.updates?.addListener(_check);
+    }
+    // The parent rebuilt, so the row is being rebuilt with it; resync the
+    // snapshot rather than diffing against a stale one.
+    _last = widget.rowState();
+  }
+
+  @override
+  void dispose() {
+    widget.updates?.removeListener(_check);
+    super.dispose();
+  }
+
+  void _check() {
+    final next = widget.rowState();
+    if (next == _last) return;
+    setState(() => _last = next);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
 }
 
 class _TrackTableState extends State<TrackTable> {
@@ -268,6 +359,12 @@ class _TrackTableState extends State<TrackTable> {
     }
     widget.onSelectionChanged!(next);
   }
+
+  _RowState _rowState(Track track) => (
+    widget.statusFor?.call(track),
+    widget.historyMarkFor?.call(track) ?? HistoryMark.none,
+    widget.playingState?.call(track) ?? PlaybackState.idle,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -355,6 +452,29 @@ class _DownloadButton extends StatelessWidget {
           icon: const Icon(Icons.download_outlined, size: 20),
         );
     }
+  }
+}
+
+class _CopyButton extends StatelessWidget {
+  const _CopyButton({required this.track});
+
+  final Track track;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Copy song',
+      icon: const Icon(Icons.content_copy, size: 18),
+      onPressed: () {
+        Clipboard.setData(ClipboardData(text: _clipboardText(track)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Copied song to clipboard.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -501,7 +621,7 @@ class _WideTable extends StatelessWidget {
                   center: true,
                 ),
               ),
-              const SizedBox(width: 48),
+              const SizedBox(width: 84),
             ],
           ),
         ),
@@ -512,133 +632,13 @@ class _WideTable extends StatelessWidget {
       itemCount: tracks.length,
       itemBuilder: (context, index) {
         final track = tracks[index];
-        final id = track.id;
-        final checked =
-            selectable && id != null && widget.selected!.contains(id);
-        final status = widget.statusFor?.call(track);
 
-        final tint = checked
-            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
-            : widget.colourByStatus
-            ? statusColor(status, theme.colorScheme, theme.brightness)
-            : null;
-
-        return InkWell(
-          onTap: widget.onTap == null ? null : () => widget.onTap!(track),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: tint,
-              border: Border(
-                bottom: BorderSide(
-                  color: theme.dividerColor.withValues(alpha: 0.4),
-                ),
-              ),
-            ),
-            child: DefaultTextStyle(
-              style: theme.textTheme.bodySmall!,
-              child: Row(
-                children: [
-                  if (selectable)
-                    SizedBox(
-                      width: 40,
-                      child: Checkbox(
-                        value: checked,
-                        onChanged: (_) => state._toggle(track),
-                      ),
-                    ),
-                  SizedBox(
-                    width: 40,
-                    child: _PlayButton(
-                      track: track,
-                      onPlay: widget.onPlay,
-                      playingState: widget.playingState,
-                    ),
-                  ),
-                  SizedBox(width: 36, child: Text('${index + 1}')),
-                  if (widget.rankFor != null)
-                    SizedBox(
-                      width: 54,
-                      child: Builder(
-                        builder: (context) {
-                          final rank = widget.rankFor!(track);
-                          if (rank == null) return const Text('');
-                          return Text(
-                            '#$rank',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: theme.colorScheme.primary,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(track.artistNames, maxLines: 2),
-                  ),
-                  Expanded(
-                    flex: 4,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          track.title,
-                          maxLines: 2,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
-                        ),
-                        if (track.badges.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          TrackBadges(track: track),
-                        ],
-                      ],
-                    ),
-                  ),
-                  Expanded(flex: 3, child: Text(track.labelName, maxLines: 2)),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      track.subGenreName.isEmpty
-                          ? track.genreName
-                          : track.subGenreName,
-                      maxLines: 2,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 52,
-                    child: Text(
-                      '${track.bpm ?? ''}',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 60,
-                    child: Center(child: _KeyChip(track: track)),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      track.length ?? '',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 48,
-                    child: _DownloadButton(
-                      track: track,
-                      onDownload: widget.onDownload,
-                      statusFor: widget.statusFor,
-                      historyMark:
-                          widget.historyMarkFor?.call(track) ??
-                          HistoryMark.none,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        // Everything the row shows of mutable state is read inside the
+        // builder, so a repaint triggered by _LiveRow picks up fresh values.
+        return _LiveRow(
+          updates: widget.updates,
+          rowState: () => state._rowState(track),
+          builder: (context) => _row(context, theme, track, index),
         );
       },
     );
@@ -648,6 +648,129 @@ class _WideTable extends StatelessWidget {
         header,
         Expanded(child: list),
       ],
+    );
+  }
+
+  Widget _row(BuildContext context, ThemeData theme, Track track, int index) {
+    final widget = state.widget;
+    final selectable = state._selectable;
+    final id = track.id;
+    final checked = selectable && id != null && widget.selected!.contains(id);
+    final status = widget.statusFor?.call(track);
+
+    final tint = checked
+        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
+        : widget.colourByStatus
+        ? statusColor(status, theme.colorScheme, theme.brightness)
+        : null;
+
+    return InkWell(
+      onTap: widget.onTap == null ? null : () => widget.onTap!(track),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          color: tint,
+          border: Border(
+            bottom: BorderSide(
+              color: theme.dividerColor.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+        child: DefaultTextStyle(
+          style: theme.textTheme.bodySmall!,
+          child: Row(
+            children: [
+              if (selectable)
+                SizedBox(
+                  width: 40,
+                  child: Checkbox(
+                    value: checked,
+                    onChanged: (_) => state._toggle(track),
+                  ),
+                ),
+              SizedBox(
+                width: 40,
+                child: _PlayButton(
+                  track: track,
+                  onPlay: widget.onPlay,
+                  playingState: widget.playingState,
+                ),
+              ),
+              SizedBox(width: 36, child: Text('${index + 1}')),
+              if (widget.rankFor != null)
+                SizedBox(
+                  width: 54,
+                  child: Builder(
+                    builder: (context) {
+                      final rank = widget.rankFor!(track);
+                      if (rank == null) return const Text('');
+                      return Text(
+                        '#$rank',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              Expanded(flex: 3, child: Text(track.artistNames, maxLines: 2)),
+              Expanded(
+                flex: 4,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 2,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    if (track.badges.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      TrackBadges(track: track),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(flex: 3, child: Text(track.labelName, maxLines: 2)),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  track.subGenreName.isEmpty
+                      ? track.genreName
+                      : track.subGenreName,
+                  maxLines: 2,
+                ),
+              ),
+              SizedBox(
+                width: 52,
+                child: Text('${track.bpm ?? ''}', textAlign: TextAlign.center),
+              ),
+              SizedBox(
+                width: 60,
+                child: Center(child: _KeyChip(track: track)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 56,
+                child: Text(track.length ?? '', textAlign: TextAlign.center),
+              ),
+              SizedBox(width: 36, child: _CopyButton(track: track)),
+              SizedBox(
+                width: 48,
+                child: _DownloadButton(
+                  track: track,
+                  onDownload: widget.onDownload,
+                  statusFor: widget.statusFor,
+                  historyMark:
+                      widget.historyMarkFor?.call(track) ?? HistoryMark.none,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -662,74 +785,79 @@ class _NarrowList extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final widget = state.widget;
-    final selectable = state._selectable;
 
     return ListView.separated(
       itemCount: tracks.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final track = tracks[index];
-        final id = track.id;
-        final checked =
-            selectable && id != null && widget.selected!.contains(id);
-        final status = widget.statusFor?.call(track);
-        final tint = checked
-            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
-            : widget.colourByStatus
-            ? statusColor(status, theme.colorScheme, theme.brightness)
-            : null;
-
-        return ListTile(
-          tileColor: tint,
-          onTap: widget.onTap == null ? null : () => widget.onTap!(track),
-          leading: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (selectable)
-                Checkbox(
-                  value: checked,
-                  onChanged: (_) => state._toggle(track),
-                ),
-              _PlayButton(
-                track: track,
-                onPlay: widget.onPlay,
-                playingState: widget.playingState,
-              ),
-            ],
-          ),
-          title: Text(track.title, maxLines: 2),
-          subtitle: Text(
-            '${track.artistNames}\n${track.labelName}',
-            maxLines: 2,
-            style: theme.textTheme.bodySmall,
-          ),
-          isThreeLine: true,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _KeyChip(track: track),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${track.bpm ?? '-'} BPM',
-                    style: theme.textTheme.labelSmall,
-                  ),
-                ],
-              ),
-              _DownloadButton(
-                track: track,
-                onDownload: widget.onDownload,
-                statusFor: widget.statusFor,
-                historyMark:
-                    widget.historyMarkFor?.call(track) ?? HistoryMark.none,
-              ),
-            ],
-          ),
+        return _LiveRow(
+          updates: widget.updates,
+          rowState: () => state._rowState(track),
+          builder: (context) => _tile(context, theme, track),
         );
       },
+    );
+  }
+
+  Widget _tile(BuildContext context, ThemeData theme, Track track) {
+    final widget = state.widget;
+    final selectable = state._selectable;
+    final id = track.id;
+    final checked = selectable && id != null && widget.selected!.contains(id);
+    final status = widget.statusFor?.call(track);
+    final tint = checked
+        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
+        : widget.colourByStatus
+        ? statusColor(status, theme.colorScheme, theme.brightness)
+        : null;
+
+    return ListTile(
+      tileColor: tint,
+      onTap: widget.onTap == null ? null : () => widget.onTap!(track),
+      leading: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (selectable)
+            Checkbox(value: checked, onChanged: (_) => state._toggle(track)),
+          _PlayButton(
+            track: track,
+            onPlay: widget.onPlay,
+            playingState: widget.playingState,
+          ),
+        ],
+      ),
+      title: Text(track.title, maxLines: 2),
+      subtitle: Text(
+        '${track.artistNames}\n${track.labelName}',
+        maxLines: 2,
+        style: theme.textTheme.bodySmall,
+      ),
+      isThreeLine: true,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _KeyChip(track: track),
+              const SizedBox(height: 4),
+              Text(
+                '${track.bpm ?? '-'} BPM',
+                style: theme.textTheme.labelSmall,
+              ),
+            ],
+          ),
+          _CopyButton(track: track),
+          _DownloadButton(
+            track: track,
+            onDownload: widget.onDownload,
+            statusFor: widget.statusFor,
+            historyMark: widget.historyMarkFor?.call(track) ?? HistoryMark.none,
+          ),
+        ],
+      ),
     );
   }
 }

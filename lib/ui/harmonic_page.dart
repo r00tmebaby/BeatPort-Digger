@@ -69,6 +69,11 @@ class _HarmonicPageState extends State<HarmonicPage> {
   bool _searched = false;
   String? _error;
 
+  // Memoized per-row update source; both notifiers live for the whole app.
+  Listenable? _updates;
+  Listenable _liveStates(DownloadQueue queue, PreviewPlayer player) =>
+      _updates ??= Listenable.merge([queue, player]);
+
   @override
   void dispose() {
     _bpmLow.dispose();
@@ -251,8 +256,16 @@ class _HarmonicPageState extends State<HarmonicPage> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _results.isNotEmpty
-              ? Consumer2<DownloadQueue, PreviewPlayer>(
-                  builder: (context, queue, player, _) {
+              // Not a Consumer for the same reason as the search results:
+              // job churn and player position ticks would rebuild the whole
+              // table, when only individual rows can actually change.
+              ? Builder(
+                  builder: (context) {
+                    final queue = context.read<DownloadQueue>();
+                    final player = context.read<PreviewPlayer>();
+                    final colourByStatus = context.select<DownloadQueue, bool>(
+                      (q) => q.colourByStatus,
+                    );
                     return TrackTable(
                       tracks: _results,
                       onTap: (track) {
@@ -266,7 +279,8 @@ class _HarmonicPageState extends State<HarmonicPage> {
                         player.toggle(track);
                       },
                       playingState: (track) => playbackStateFor(player, track),
-                      colourByStatus: queue.colourByStatus,
+                      colourByStatus: colourByStatus,
+                      updates: _liveStates(queue, player),
                     );
                   },
                 )
@@ -467,10 +481,12 @@ class _HarmonicPageState extends State<HarmonicPage> {
           const SizedBox(width: 12),
           TextButton(onPressed: _showCrate, child: const Text('View')),
           const Spacer(),
-          Consumer<DownloadQueue>(
-            builder: (context, queue, _) => FilledButton.tonalIcon(
+          // Only used inside the callback, so there is nothing here to listen
+          // for. As a Consumer this rebuilt on every job change in the app.
+          Builder(
+            builder: (context) => FilledButton.tonalIcon(
               onPressed: () {
-                final added = queue.enqueueAll(_crate);
+                final added = context.read<DownloadQueue>().enqueueAll(_crate);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Queued $added tracks.')),
                 );

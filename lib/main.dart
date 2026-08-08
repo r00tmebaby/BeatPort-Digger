@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'package:media_kit/media_kit.dart';
 
+import 'state/digger.dart';
 import 'state/downloads.dart';
 import 'state/player.dart';
 import 'state/session.dart';
@@ -26,9 +27,7 @@ class BeatPortDiggerApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => Session()..restore()),
 
         ChangeNotifierProxyProvider<Session, DownloadQueue>(
-          create: (_) => DownloadQueue()
-            ..loadSettings()
-            ..loadHistory(),
+          create: (_) => DownloadQueue()..restore(),
           update: (_, session, queue) =>
               (queue ?? DownloadQueue())..bind(session.catalog),
         ),
@@ -36,6 +35,14 @@ class BeatPortDiggerApp extends StatelessWidget {
           create: (_) => PreviewPlayer(),
           update: (_, session, player) =>
               (player ?? PreviewPlayer())..bind(session.catalog),
+        ),
+
+        // Watches both so an automatic dig can start as soon as the session
+        // is signed in and the genre list has arrived.
+        ChangeNotifierProxyProvider2<Session, DownloadQueue, DiggerRunner>(
+          create: (_) => DiggerRunner()..load(),
+          update: (_, session, queue, runner) =>
+              (runner ?? DiggerRunner())..attach(session, queue),
         ),
       ],
       child: MaterialApp(

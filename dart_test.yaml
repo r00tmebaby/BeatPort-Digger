@@ -7,3 +7,8 @@
 tags:
   live:
     skip: "needs Beatport credentials; run with --tags live --run-skipped"
+  # Performance probes. They build six-figure queues and take minutes, so they
+  # stay out of the normal run:
+  #   flutter test --tags bench --run-skipped
+  bench:
+    skip: "performance probe; run with --tags bench --run-skipped"

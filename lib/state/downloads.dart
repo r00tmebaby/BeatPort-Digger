@@ -1,28 +1,47 @@
 library;
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../engine/catalog.dart';
 import '../engine/download.dart';
 import '../engine/download_history.dart';
+import '../engine/errors.dart';
 import '../engine/ffmpeg.dart';
 import '../engine/media_store.dart';
 import '../engine/models.dart';
 
 enum JobStatus { queued, running, completed, failed, cancelled }
 
+/// Total tries for one job, including the first. Only transient failures are
+/// retried; a refusal the account cannot satisfy fails straight away.
+const int maxJobAttempts = 3;
+
+/// Ceiling on tracks downloading at once.
+///
+/// What this actually costs depends on the quality. A direct download (FLAC,
+/// and the AAC qualities the account can take outright) is one connection per
+/// track, so this number is the connection count. A track that falls back to
+/// the stream fetches [segmentWindow] segments at once and ends with an
+/// ffmpeg remux, so those multiply.
+///
+/// Metadata calls are gated separately by the client's own limiter, so raising
+/// this does not increase the rate of requests to the API itself.
+const int maxParallelDownloads = 64;
+
 class DownloadJob {
-  DownloadJob(this.track);
+  DownloadJob(this.track, {this.status = JobStatus.queued});
 
   final Track track;
-  final Cancellation cancellation = Cancellation();
+  Cancellation cancellation = Cancellation();
 
-  JobStatus status = JobStatus.queued;
+  JobStatus status;
   DownloadProgress? progress;
   String? path;
   String? error;
@@ -35,10 +54,55 @@ class DownloadJob {
   /// account has no active subscription. Null unless [isSample] is true.
   String? sampleReason;
 
+  /// How many times this job has been handed to the downloader.
+  int attempts = 0;
+
+  /// Lower-cased sort keys for the Downloads list, computed once each.
+  /// Lower-casing inside a comparator allocates two strings per comparison,
+  /// which is what dominates the sort once the queue holds six figures.
+  late final String titleKey = track.title.toLowerCase();
+  late final String artistKey = track.artistNames.toLowerCase();
+
   bool get isFinished =>
       status == JobStatus.completed ||
       status == JobStatus.failed ||
       status == JobStatus.cancelled;
+
+  /// Returns the job to a fresh queued state for a retry, keeping its place in
+  /// the list so the row does not jump around under the user.
+  void reset() {
+    status = JobStatus.queued;
+    cancellation = Cancellation();
+    progress = null;
+    path = null;
+    error = null;
+    remuxed = true;
+    isSample = false;
+    sampleReason = null;
+    attempts = 0;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'track': track.toJson(),
+    if (status == JobStatus.failed) 'failed': true,
+    if (error != null) 'error': error,
+  };
+
+  static DownloadJob? fromJson(Map<String, dynamic> json) {
+    final raw = json['track'];
+    if (raw is! Map<String, dynamic>) return null;
+    final track = Track.fromJson(raw);
+    if (track.id == null) return null;
+
+    final failed = json['failed'] == true;
+    final job = DownloadJob(
+      track,
+      status: failed ? JobStatus.failed : JobStatus.queued,
+    );
+    final error = json['error'];
+    if (failed && error is String) job.error = error;
+    return job;
+  }
 }
 
 class DownloadQueue extends ChangeNotifier {
@@ -49,7 +113,7 @@ class DownloadQueue extends ChangeNotifier {
   int get maxConcurrent => _maxConcurrent;
 
   set maxConcurrent(int value) {
-    final clamped = value.clamp(1, 16);
+    final clamped = value.clamp(1, maxParallelDownloads);
     if (clamped == _maxConcurrent) return;
     _maxConcurrent = clamped;
     _notify();
@@ -74,33 +138,130 @@ class DownloadQueue extends ChangeNotifier {
   int _running = 0;
   bool _disposed = false;
 
+  Timer? _notifyTimer;
+  bool _notifyPending = false;
+
+  bool get _busy => _running > 0 || discovering;
+
+  /// Publishes a change to listeners.
+  ///
+  /// While the queue is working it changes many times a second, and because
+  /// the app keeps every page built inside an IndexedStack, each of those
+  /// changes rebuilds Downloads, Search, Harmonic, Link and Settings together.
+  /// Batching them leaves the frame budget free for scrolling and playback.
+  /// When nothing is running the change goes out immediately, so a one-off
+  /// action still feels instant.
   void _notify() {
+    if (_disposed) return;
+    if (!_busy) {
+      _flushNotify();
+      return;
+    }
+    if (_notifyPending) return;
+    _notifyPending = true;
+    _notifyTimer = Timer(_notifyInterval, _flushNotify);
+  }
+
+  /// How long to batch changes for.
+  ///
+  /// Every listener in the app redraws on each of these, so the more work is
+  /// in flight the less often it is worth doing. At sixty-four downloads the
+  /// individual progress bars crawl anyway, so a slower refresh is not
+  /// visible, while the frames it frees up very much are.
+  Duration get _notifyInterval {
+    final scaled = 120 + _running * 4;
+    return Duration(milliseconds: scaled > 400 ? 400 : scaled);
+  }
+
+  void _flushNotify() {
+    _notifyTimer?.cancel();
+    _notifyTimer = null;
+    _notifyPending = false;
     if (_disposed) return;
     notifyListeners();
   }
 
   // Segment-level progress fires far more often than the UI needs to redraw
   // (every batch of every concurrent job); at maxConcurrent=16 that is
-  // hundreds of notifyListeners() calls a second and visibly stalls the UI.
-  // Progress notifications are throttled; state-changing ones (queued,
-  // running, completed, failed) always go through _notify() directly.
-  DateTime _lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+  // hundreds of calls a second. [_shouldPublishProgress] drops the
+  // uninteresting ones before they ever reach [_notify], which then batches
+  // whatever is left.
+  static const int _progressByteStep = 256 * 1024;
 
-  void _notifyProgress() {
-    final now = DateTime.now();
-    if (now.difference(_lastProgressNotify) <
-        const Duration(milliseconds: 120)) {
-      return;
+  void _notifyProgress() => _notify();
+
+  bool _shouldPublishProgress(
+    DownloadProgress? previous,
+    DownloadProgress next,
+  ) {
+    if (previous == null) return true;
+    if (next.total != previous.total || next.segmented != previous.segmented) {
+      return true;
     }
-    _lastProgressNotify = now;
-    _notify();
+    if (next.segmented && next.completed != previous.completed) return true;
+    if (next.total > 0 && next.completed >= next.total) return true;
+    if (next.bytes - previous.bytes >= _progressByteStep) return true;
+    return false;
   }
 
   final List<DownloadJob> _jobs = [];
 
   final Map<int, DownloadJob> _byId = {};
 
-  List<DownloadJob> get jobs => List.unmodifiable(_jobs);
+  /// Jobs waiting for a slot, in the order they will run.
+  ///
+  /// Scanning [_jobs] for the next queued entry was linear per completion,
+  /// which turns a large queue quadratic: with 100,000 mostly-finished jobs
+  /// the scan walked the whole list every time a download ended. Entries here
+  /// are removed lazily, so a job cancelled while waiting is simply skipped
+  /// when its turn comes.
+  final Queue<DownloadJob> _pending = Queue();
+
+  /// Jobs downloading right now, in the order they started.
+  ///
+  /// Never longer than [maxConcurrent], so the UI can show what is in flight
+  /// without scanning a queue that may hold six figures.
+  final List<DownloadJob> _active = [];
+
+  int _unfinished = 0;
+  int _revision = 0;
+  int _structure = 0;
+
+  List<DownloadJob> get jobs => UnmodifiableListView(_jobs);
+
+  List<DownloadJob> get active => UnmodifiableListView(_active);
+
+  /// Bumped whenever a job is added, removed, or changes status. The Downloads
+  /// list caches its derived views against this rather than rebuilding them
+  /// from every job on every notification.
+  int get revision => _revision;
+
+  /// Bumped only when jobs are added or removed. Orderings that do not depend
+  /// on status can cache against this and survive an entire bulk download
+  /// without re-sorting.
+  int get structureRevision => _structure;
+
+  /// Applies a status change and keeps the unfinished count in step. Every
+  /// transition goes through here so [activeCount] never has to count.
+  void _setStatus(DownloadJob job, JobStatus status) {
+    if (job.status == status) return;
+    final wasRunning = job.status == JobStatus.running;
+    if (!job.isFinished) _unfinished -= 1;
+    job.status = status;
+    if (!job.isFinished) _unfinished += 1;
+
+    if (status == JobStatus.running) {
+      _active.add(job);
+    } else if (wasRunning) {
+      _active.remove(job);
+    }
+    _revision += 1;
+
+    // Starting a job changes nothing worth persisting: a running job is
+    // restored as queued anyway, and rewriting a six-figure queue every time
+    // a slot turns over would keep the disk busy for no gain.
+    if (status != JobStatus.running) _scheduleQueueSave();
+  }
 
   final Map<int, HistoryEntry> _history = {};
   Timer? _historyFlush;
@@ -109,8 +270,21 @@ class DownloadQueue extends ChangeNotifier {
       _history.values.toList()
         ..sort((a, b) => b.completedAt.compareTo(a.completedAt));
 
+  int _missingCount = 0;
+
   int get historyCount => _history.length;
-  int get missingCount => _history.values.where((e) => !e.present).length;
+
+  /// Counted as entries change rather than scanned. The settings page reads
+  /// this on every build, and a scan of a six-figure history there was enough
+  /// to stall the whole app while downloads ran.
+  int get missingCount => _missingCount;
+
+  void _putHistory(HistoryEntry entry) {
+    final previous = _history[entry.trackId];
+    if (previous != null && !previous.present) _missingCount -= 1;
+    if (!entry.present) _missingCount += 1;
+    _history[entry.trackId] = entry;
+  }
 
   HistoryMark historyMark(Track track) {
     final id = track.id;
@@ -125,22 +299,24 @@ class DownloadQueue extends ChangeNotifier {
   void _recordHistory(Track track, String path, String qualityLabel) {
     final id = track.id;
     if (id == null) return;
-    _history[id] = HistoryEntry(
-      trackId: id,
-      title: track.title,
-      artists: track.artistNames,
-      path: path,
-      quality: qualityLabel,
-      completedAt: _now(),
-      present: true,
+    _putHistory(
+      HistoryEntry(
+        trackId: id,
+        title: track.title,
+        artists: track.artistNames,
+        path: path,
+        quality: qualityLabel,
+        completedAt: _now(),
+        present: true,
+      ),
     );
     _scheduleHistorySave();
   }
 
   DateTime _now() => DateTime.now();
 
-  bool get isBusy => _jobs.any((job) => !job.isFinished);
-  int get activeCount => _jobs.where((job) => !job.isFinished).length;
+  bool get isBusy => _unfinished > 0;
+  int get activeCount => _unfinished;
 
   bool _ffmpegReady = false;
   bool _ffmpegChecked = false;
@@ -156,6 +332,10 @@ class DownloadQueue extends ChangeNotifier {
     if (_downloader?.catalog == catalog) return;
     _downloader?.close();
     _downloader = Downloader(catalog: catalog, ffmpeg: ffmpeg);
+
+    // A queue restored from disk has nothing to run against until a catalog
+    // arrives, so this is where that work actually starts.
+    unawaited(_pump());
   }
 
   Future<void> checkFfmpeg() async {
@@ -192,6 +372,25 @@ class DownloadQueue extends ChangeNotifier {
   }
 
   String? destinationOverride;
+
+  /// Whether a bulk enqueue passes over tracks already saved on disk.
+  ///
+  /// Applies to sweeps only, never to a deliberate single download, and only
+  /// while the file is still where history says it is: delete it and the track
+  /// becomes eligible again.
+  bool skipDownloaded = true;
+
+  set skipExisting(bool value) {
+    if (skipDownloaded == value) return;
+    skipDownloaded = value;
+    _notify();
+    unawaited(saveSettings());
+  }
+
+  int _skippedDownloaded = 0;
+
+  /// Running total of tracks a sweep passed over as already downloaded.
+  int get skippedDownloaded => _skippedDownloaded;
 
   bool colourByStatus = true;
 
@@ -249,6 +448,15 @@ class DownloadQueue extends ChangeNotifier {
     );
   }
 
+  /// Loads everything the queue keeps on disk, in the order the later steps
+  /// depend on: history first, because restoring the queue consults it to
+  /// skip tracks that already downloaded.
+  Future<void> restore() async {
+    await loadSettings();
+    await loadHistory();
+    await loadQueue();
+  }
+
   Future<void> loadSettings() async {
     try {
       final file = await _settingsFile();
@@ -263,7 +471,9 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
       final concurrent = payload['max_concurrent'];
-      if (concurrent is int) _maxConcurrent = concurrent.clamp(1, 16);
+      if (concurrent is int) {
+        _maxConcurrent = concurrent.clamp(1, maxParallelDownloads);
+      }
       final folder = payload['destination'];
       if (folder is String && folder.isNotEmpty) destinationOverride = folder;
       final folders = payload['folder_template'];
@@ -272,6 +482,8 @@ class DownloadQueue extends ChangeNotifier {
       if (files is String && files.trim().isNotEmpty) fileTemplate = files;
       final colours = payload['status_colours'];
       if (colours is bool) colourByStatus = colours;
+      final skip = payload['skip_downloaded'];
+      if (skip is bool) skipDownloaded = skip;
 
       _notify();
     } on Object {
@@ -290,6 +502,7 @@ class DownloadQueue extends ChangeNotifier {
           'folder_template': folderTemplate,
           'file_template': fileTemplate,
           'status_colours': colourByStatus,
+          'skip_downloaded': skipDownloaded,
           if (destinationOverride != null) 'destination': destinationOverride,
         }),
       );
@@ -313,7 +526,7 @@ class DownloadQueue extends ChangeNotifier {
         if (payload is List) {
           for (final raw in payload.whereType<Map<String, dynamic>>()) {
             final entry = HistoryEntry.fromJson(raw);
-            if (entry != null) _history[entry.trackId] = entry;
+            if (entry != null) _putHistory(entry);
           }
         }
       }
@@ -332,7 +545,7 @@ class DownloadQueue extends ChangeNotifier {
 
       if (!_history.containsKey(entry.trackId)) continue;
       if (present != entry.present) {
-        _history[entry.trackId] = entry.copyWith(present: present);
+        _putHistory(entry.copyWith(present: present));
         changed = true;
       }
     }
@@ -344,12 +557,14 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<void> removeMissingHistory() async {
     _history.removeWhere((_, entry) => !entry.present);
+    _missingCount = 0;
     _notify();
     await _saveHistory();
   }
 
   Future<void> clearHistory() async {
     _history.clear();
+    _missingCount = 0;
     _notify();
     await _saveHistory();
   }
@@ -373,41 +588,282 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
+  /// How many records to encode before yielding to the event loop while
+  /// saving. Encoding a six-figure queue in one go would drop frames, so the
+  /// work is broken into slices well under a frame's budget.
+  static const int _queueSaveChunk = 500;
+
+  static const Duration _queueSaveDelay = Duration(seconds: 5);
+
+  /// How long to wait before writing the queue out.
+  ///
+  /// Rewriting the file costs a pass over every outstanding job, so a large
+  /// queue is saved less often. There is little to lose by it: the entries are
+  /// almost all still just "queued", and the worst a crash costs is a few
+  /// tracks downloaded twice.
+  Duration get _saveDelay {
+    final seconds = _jobs.length ~/ 2000;
+    return seconds <= _queueSaveDelay.inSeconds
+        ? _queueSaveDelay
+        : Duration(seconds: seconds > 60 ? 60 : seconds);
+  }
+
+  Timer? _queueFlush;
+  bool _queueDirty = false;
+  bool _queueSaving = false;
+
+  Future<File> _queueFile() async {
+    final support = await getApplicationSupportDirectory();
+    return File('${support.path}${Platform.pathSeparator}download_queue.jsonl');
+  }
+
+  /// Marks the queue as needing a save without resetting an already pending
+  /// one, so a continuous stream of changes still reaches disk on schedule
+  /// instead of pushing the write back indefinitely.
+  void _scheduleQueueSave() {
+    _queueDirty = true;
+    if (_queueFlush?.isActive ?? false) return;
+    _queueFlush = Timer(_saveDelay, () => unawaited(saveQueue()));
+  }
+
+  /// Restores work that was outstanding when the app last closed.
+  ///
+  /// Running jobs come back queued, failed ones come back failed so the retry
+  /// button still works, and anything already downloaded is skipped. Call
+  /// after [loadHistory] so that last check has something to consult.
+  Future<void> loadQueue() async {
+    final restored = <DownloadJob>[];
+    try {
+      final file = await _queueFile();
+      if (!await file.exists()) return;
+
+      final lines = file
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+
+      await for (final line in lines) {
+        if (line.trim().isEmpty) continue;
+        final job = _decodeJob(line);
+        if (job == null) continue;
+
+        final id = job.track.id!;
+        if (_byId.containsKey(id)) continue;
+        if (_history[id]?.present ?? false) continue;
+
+        _byId[id] = job;
+        restored.add(job);
+        if (!job.isFinished) {
+          _unfinished += 1;
+          _pending.add(job);
+        }
+      }
+    } on Object {
+      // Best-effort restore; whatever was read before the failure is kept.
+    }
+
+    if (restored.isEmpty) return;
+    _jobs.addAll(restored);
+    _structure += 1;
+    _revision += 1;
+    _notify();
+    unawaited(_pump());
+  }
+
+  /// Decodes one persisted line, tolerating a damaged record rather than
+  /// losing the rest of the queue with it.
+  DownloadJob? _decodeJob(String line) {
+    try {
+      final payload = jsonDecode(line);
+      if (payload is! Map<String, dynamic>) return null;
+      return DownloadJob.fromJson(payload);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Writes the outstanding queue, coalescing overlapping calls. Changes made
+  /// while a save is running trigger another pass rather than being lost.
+  Future<void> saveQueue() async {
+    _queueFlush?.cancel();
+    if (_queueSaving) return;
+    _queueSaving = true;
+    try {
+      while (_queueDirty) {
+        _queueDirty = false;
+        await _writeQueue();
+      }
+    } finally {
+      _queueSaving = false;
+    }
+  }
+
+  Future<void> _writeQueue() async {
+    try {
+      final file = await _queueFile();
+      await file.parent.create(recursive: true);
+      final temp = File('${file.path}.tmp');
+
+      // Jobs finish while this runs, so iterate a snapshot; each record's
+      // status is read at encode time, which means a job that completed
+      // mid-write is simply left out.
+      final snapshot = List.of(_jobs);
+      final sink = temp.openWrite();
+      var written = 0;
+      try {
+        for (final job in snapshot) {
+          if (job.status == JobStatus.completed ||
+              job.status == JobStatus.cancelled) {
+            continue;
+          }
+          sink.writeln(jsonEncode(job.toJson()));
+          if (++written % _queueSaveChunk == 0) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+
+      // One atomic swap, so a crash mid-write cannot leave a half queue in
+      // place of the real one.
+      await temp.rename(file.path);
+    } on Object {
+      // Best-effort queue save; ignore write failures (e.g. read-only fs).
+    }
+  }
+
   DownloadJob? jobFor(Track track) {
     final id = track.id;
     return id == null ? null : _byId[id];
   }
 
-  bool _add(Track track) {
-    final id = track.id;
-    if (id == null) return false;
-
-    final existing = _byId[id];
-
-    if (existing != null && !_isRetryable(existing)) return false;
-    if (existing != null) _jobs.remove(existing);
-
-    final job = DownloadJob(track);
-    _jobs.add(job);
-    _byId[id] = job;
-    return true;
-  }
-
-  void enqueue(Track track) {
-    if (!_add(track)) return;
-    _notify();
-    unawaited(_pump());
+  int _firstQueuedIndex() {
+    for (var i = 0; i < _jobs.length; i++) {
+      if (_jobs[i].status == JobStatus.queued) return i;
+    }
+    return _jobs.length;
   }
 
   bool _isRetryable(DownloadJob job) =>
       job.status == JobStatus.failed || job.status == JobStatus.cancelled;
 
+  /// Marks [track] as wanted, without deciding where it runs.
+  ///
+  /// [queued] is the job now waiting to download, if any. [placement] is set
+  /// only when that job is new and still needs a position in [_jobs]; a track
+  /// already present but finished unsuccessfully is reused where it stands,
+  /// because removing and re-appending it would be a linear scan per track and
+  /// makes retrying a large queue quadratic.
+  ///
+  /// [bulk] marks the track as part of a sweep rather than a deliberate pick,
+  /// which is what [skipDownloaded] applies to.
+  ({DownloadJob? placement, DownloadJob? queued}) _prepare(
+    Track track, {
+    required bool bulk,
+  }) {
+    final id = track.id;
+    if (id == null) return (placement: null, queued: null);
+
+    // Already on disk from an earlier sweep. Repeat digs lean on this, which
+    // is why it counts skips rather than silently doing nothing.
+    if (bulk && skipDownloaded && (_history[id]?.present ?? false)) {
+      _skippedDownloaded += 1;
+      return (placement: null, queued: null);
+    }
+
+    final existing = _byId[id];
+    if (existing != null) {
+      if (!_isRetryable(existing)) return (placement: null, queued: null);
+      existing.reset();
+      _unfinished += 1;
+      _revision += 1;
+      return (placement: null, queued: existing);
+    }
+
+    final job = DownloadJob(track);
+    _byId[id] = job;
+    _unfinished += 1;
+    _revision += 1;
+    _structure += 1;
+    return (placement: job, queued: job);
+  }
+
+  /// True when [track] became queued, whether as a new job or a reused one.
+  bool _add(Track track, {bool bulk = false}) {
+    final result = _prepare(track, bulk: bulk);
+    final job = result.queued;
+    if (job == null) return false;
+
+    final placement = result.placement;
+    if (placement != null) _jobs.add(placement);
+    _pending.add(job);
+    return true;
+  }
+
+  void enqueue(Track track) {
+    if (!_add(track)) return;
+    _scheduleQueueSave();
+    _notify();
+    unawaited(_pump());
+  }
+
+  void enqueueFirst(Track track) {
+    if (_addFirst([track]) == 0) return;
+    _scheduleQueueSave();
+    _notify();
+    unawaited(_pump());
+  }
+
+  /// Places a batch ahead of the work still waiting, keeping the batch's own
+  /// order. The insertion point is found once and the batch goes in as a
+  /// single splice rather than one shifting insert per track.
+  int _addFirst(Iterable<Track> tracks, {bool bulk = false}) {
+    final batch = <DownloadJob>[];
+    final reused = <DownloadJob>{};
+
+    for (final track in tracks) {
+      final result = _prepare(track, bulk: bulk);
+      final job = result.queued;
+      if (job == null) continue;
+      batch.add(job);
+      if (result.placement == null) reused.add(job);
+    }
+    if (batch.isEmpty) return 0;
+
+    // Jobs being retried already sit somewhere in the list. Lifting them out
+    // in one pass keeps this linear in the queue rather than in the batch
+    // size times the queue.
+    if (reused.isNotEmpty) {
+      _jobs.removeWhere(reused.contains);
+      _structure += 1;
+    }
+
+    _jobs.insertAll(_firstQueuedIndex(), batch);
+    for (final job in batch.reversed) {
+      _pending.addFirst(job);
+    }
+    return batch.length;
+  }
+
   int enqueueAll(Iterable<Track> tracks) {
     var added = 0;
     for (final track in tracks) {
-      if (_add(track)) added += 1;
+      if (_add(track, bulk: true)) added += 1;
     }
     if (added > 0) {
+      _scheduleQueueSave();
+      _notify();
+      unawaited(_pump());
+    }
+    return added;
+  }
+
+  int enqueueAllFirst(Iterable<Track> tracks) {
+    final added = _addFirst(tracks, bulk: true);
+    if (added > 0) {
+      _scheduleQueueSave();
       _notify();
       unawaited(_pump());
     }
@@ -416,6 +872,9 @@ class DownloadQueue extends ChangeNotifier {
 
   bool discovering = false;
   int discovered = 0;
+
+  /// How many tracks this walk passed over as already downloaded.
+  int discoverSkipped = 0;
   String? discoverLabel;
   String? discoverError;
   Cancellation? _discovery;
@@ -427,15 +886,25 @@ class DownloadQueue extends ChangeNotifier {
     _notify();
   }
 
+  /// Retitles the walk in progress. A dig moving between genres uses this so
+  /// the discovery banner names the category being worked on.
+  void describeDiscovery(String label) {
+    if (!discovering || discoverLabel == label) return;
+    discoverLabel = label;
+    _notify();
+  }
+
   Future<int> enqueueStream(
     Stream<Track> source, {
     required String label,
   }) async {
     if (discovering) return 0;
     final cancellation = Cancellation();
+    final skippedBefore = _skippedDownloaded;
     _discovery = cancellation;
     discovering = true;
     discovered = 0;
+    discoverSkipped = 0;
     discoverLabel = label;
     discoverError = null;
     _notify();
@@ -444,23 +913,33 @@ class DownloadQueue extends ChangeNotifier {
       var sinceNotify = 0;
       await for (final track in source) {
         if (cancellation.isCancelled) break;
-        if (_add(track)) {
-          discovered += 1;
-          sinceNotify += 1;
-        }
+        if (_add(track, bulk: true)) discovered += 1;
 
-        if (sinceNotify >= 25) {
+        // Counts move per track so the digger's progress line actually
+        // climbs; _notify batches them into a few updates a second, so this
+        // costs nothing. A sweep over material already on disk queues nothing
+        // and used to sit there looking stalled.
+        discoverSkipped = _skippedDownloaded - skippedBefore;
+        _notify();
+
+        // Starting downloads and writing the queue file are the expensive
+        // parts, so those stay on a checkpoint.
+        if (++sinceNotify >= 25) {
           sinceNotify = 0;
-          _notify();
+          _scheduleQueueSave();
           unawaited(_pump());
         }
       }
       unawaited(_pump());
     } on Object catch (exception) {
+      // Whatever the walk found before it broke stays queued, so a failure
+      // partway through a long discovery costs progress but not work.
       discoverError = exception.toString();
     } finally {
+      discoverSkipped = _skippedDownloaded - skippedBefore;
       discovering = false;
       _discovery = null;
+      if (discovered > 0) _scheduleQueueSave();
       _notify();
     }
     return discovered;
@@ -470,19 +949,30 @@ class DownloadQueue extends ChangeNotifier {
     if (job.isFinished) return;
     job.cancellation.cancel();
     if (job.status == JobStatus.queued) {
-      job.status = JobStatus.cancelled;
+      // The stale entry left in _pending is skipped when its turn comes.
+      _setStatus(job, JobStatus.cancelled);
     }
     _notify();
     unawaited(_pump());
   }
 
+  void _forget(DownloadJob job) {
+    final id = job.track.id;
+    if (id != null && identical(_byId[id], job)) _byId.remove(id);
+  }
+
   void clearFinished() {
+    final before = _jobs.length;
     _jobs.removeWhere((job) {
       if (!job.isFinished) return false;
-      _byId.remove(job.track.id);
+      _forget(job);
       return true;
     });
+    if (_jobs.length == before) return;
+    _structure += 1;
+    _revision += 1;
     _notify();
+    _scheduleQueueSave();
   }
 
   void cancelAll() {
@@ -490,19 +980,16 @@ class DownloadQueue extends ChangeNotifier {
     for (final job in _jobs) {
       if (job.isFinished) continue;
       job.cancellation.cancel();
-      if (job.status == JobStatus.queued) job.status = JobStatus.cancelled;
+      if (job.status == JobStatus.queued) {
+        _setStatus(job, JobStatus.cancelled);
+      }
     }
     _notify();
   }
 
   void clearAll() {
     cancelAll();
-    _jobs.removeWhere((job) {
-      if (!job.isFinished) return false;
-      _byId.remove(job.track.id);
-      return true;
-    });
-    _notify();
+    clearFinished();
   }
 
   Future<void> _pump() async {
@@ -510,20 +997,48 @@ class DownloadQueue extends ChangeNotifier {
     if (downloader == null) return;
 
     while (_running < maxConcurrent) {
-      DownloadJob? next;
-      for (final job in _jobs) {
-        if (job.status == JobStatus.queued) {
-          next = job;
-          break;
-        }
-      }
+      final next = _nextPending();
       if (next == null) return;
 
       _running += 1;
-      next.status = JobStatus.running;
+      next.attempts += 1;
+      _setStatus(next, JobStatus.running);
       _notify();
       unawaited(_run(downloader, next));
     }
+  }
+
+  DownloadJob? _nextPending() {
+    while (_pending.isNotEmpty) {
+      final job = _pending.removeFirst();
+      if (job.status == JobStatus.queued) return job;
+    }
+    return null;
+  }
+
+  /// Puts a job back after a transient failure.
+  ///
+  /// It waits first, because a CDN error or a dropped socket recurs
+  /// immediately and would otherwise burn the whole retry budget in
+  /// milliseconds. It then goes to the head rather than the tail, so a track
+  /// that stumbled once is not deferred behind another hundred thousand.
+  void _scheduleRetry(DownloadJob job) {
+    Timer(Duration(seconds: 2 * job.attempts), () {
+      if (_disposed || job.status != JobStatus.queued) return;
+      _pending.addFirst(job);
+      unawaited(_pump());
+    });
+  }
+
+  /// Whether a failure is worth another go. A refusal the account cannot
+  /// satisfy, or a dead session, will fail the same way every time; a rate
+  /// limit, a gateway error or a dropped socket will not.
+  bool _isTransient(Object exception) {
+    if (exception is AuthException) return false;
+    if (exception is BeatportException) {
+      return retryableStatuses.contains(exception.status);
+    }
+    return exception is http.ClientException || exception is SocketException;
   }
 
   Future<void> _run(Downloader downloader, DownloadJob job) async {
@@ -536,11 +1051,13 @@ class DownloadQueue extends ChangeNotifier {
         fileTemplate: fileTemplate,
         cancellation: job.cancellation,
         onProgress: (progress) {
+          final previous = job.progress;
           job.progress = progress;
-          _notifyProgress();
+          if (_shouldPublishProgress(previous, progress)) {
+            _notifyProgress();
+          }
         },
       );
-      job.status = JobStatus.completed;
       job.path = result.path;
       job.remuxed = result.remuxed;
       job.isSample = result.isSample;
@@ -558,6 +1075,7 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
 
+      _setStatus(job, JobStatus.completed);
       _recordHistory(
         job.track,
         job.path!,
@@ -566,10 +1084,18 @@ class DownloadQueue extends ChangeNotifier {
             : quality.label,
       );
     } on DownloadCancelled {
-      job.status = JobStatus.cancelled;
+      _setStatus(job, JobStatus.cancelled);
     } on Object catch (exception) {
-      job.status = JobStatus.failed;
       job.error = exception.toString();
+      if (job.attempts < maxJobAttempts &&
+          !job.cancellation.isCancelled &&
+          _isTransient(exception)) {
+        job.progress = null;
+        _setStatus(job, JobStatus.queued);
+        _scheduleRetry(job);
+      } else {
+        _setStatus(job, JobStatus.failed);
+      }
     } finally {
       _running -= 1;
       _notify();
@@ -580,9 +1106,16 @@ class DownloadQueue extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _notifyTimer?.cancel();
 
     if (_historyFlush?.isActive ?? false) unawaited(_saveHistory());
     _historyFlush?.cancel();
+
+    // Best-effort final flush. It may not finish if the process is going
+    // away, which costs at most the last few seconds of queue changes.
+    if (_queueDirty) unawaited(saveQueue());
+    _queueFlush?.cancel();
+
     for (final job in _jobs) {
       job.cancellation.cancel();
     }

@@ -57,7 +57,21 @@ class _LinkTabState extends State<LinkTab> {
   @override
   Widget build(BuildContext context) {
     final session = context.read<Session>();
-    final queue = context.watch<DownloadQueue>();
+
+    // This page is kept alive in an IndexedStack, so watching the whole queue
+    // redrew it on every job change while it was not even on screen. Only the
+    // discovery banner here depends on the queue, so only that is listened
+    // for; a record compares by value, so job churn no longer reaches it.
+    final queue = context.read<DownloadQueue>();
+    final walk = context
+        .select<DownloadQueue, ({bool on, String? label, int found})>(
+          (q) => (
+            on: q.isDiscovering,
+            label: q.discoverLabel,
+            found: q.discovered,
+          ),
+        );
+    final discovering = walk.on;
     final theme = Theme.of(context);
 
     return SingleChildScrollView(
@@ -73,7 +87,7 @@ class _LinkTabState extends State<LinkTab> {
                   controller: _controller,
                   autofocus: true,
                   textInputAction: TextInputAction.go,
-                  onSubmitted: queue.isDiscovering
+                  onSubmitted: discovering
                       ? null
                       : (_) => _submit(session, queue),
                   decoration: const InputDecoration(
@@ -88,9 +102,7 @@ class _LinkTabState extends State<LinkTab> {
               SizedBox(
                 height: 56,
                 child: FilledButton.icon(
-                  onPressed: queue.isDiscovering
-                      ? null
-                      : () => _submit(session, queue),
+                  onPressed: discovering ? null : () => _submit(session, queue),
                   icon: const Icon(Icons.playlist_add, size: 18),
                   label: const Text('Queue'),
                 ),
@@ -112,7 +124,7 @@ class _LinkTabState extends State<LinkTab> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(_lastResult!, style: theme.textTheme.bodyMedium),
             ),
-          if (queue.isDiscovering)
+          if (discovering)
             Padding(
               padding: const EdgeInsets.only(top: 14),
               child: Row(
@@ -125,8 +137,8 @@ class _LinkTabState extends State<LinkTab> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${queue.discoverLabel ?? 'Finding tracks'} - '
-                      '${queue.discovered} queued',
+                      '${walk.label ?? 'Finding tracks'} - '
+                      '${walk.found} queued',
                       style: theme.textTheme.bodySmall,
                     ),
                   ),

@@ -84,11 +84,22 @@ String renderTemplate(String template, Map<String, String> values) =>
 List<String> folderSegments(String template, Track track) {
   if (template.trim().isEmpty) return const [];
   final values = templateValues(track);
-  return template
-      .split(RegExp(r'[/\\]'))
-      .map((segment) => sanitizeSegment(renderTemplate(segment, values)))
-      .where((segment) => segment.isNotEmpty)
-      .toList();
+
+  final segments = <String>[];
+  for (final part in template.split(RegExp(r'[/\\]'))) {
+    final segment = sanitizeSegment(renderTemplate(part, values));
+    if (segment.isEmpty) continue;
+
+    // A repeated level is never what was meant. It happens because
+    // {subgenre} falls back to the genre, so "{genre}/{subgenre}" on a track
+    // with no sub-genre would otherwise nest the genre inside itself.
+    if (segments.isNotEmpty &&
+        segments.last.toLowerCase() == segment.toLowerCase()) {
+      continue;
+    }
+    segments.add(segment);
+  }
+  return segments;
 }
 
 final RegExp _illegal = RegExp(r'[<>:"|?*\x00-\x1f/\\]');

@@ -151,6 +151,23 @@ void main() {
       expect(queue.enqueueAll([track(1), track(2), track(1)]), 2);
     });
 
+    test('enqueueFirst prioritizes a track ahead of queued work', () {
+      final queue = DownloadQueue();
+      queue.enqueue(track(1));
+      queue.enqueue(track(2));
+      queue.enqueueFirst(track(3));
+      expect(queue.jobs.map((job) => job.track.id), [3, 1, 2]);
+    });
+
+    test('enqueueAllFirst keeps page order while moving it to the front', () {
+      final queue = DownloadQueue();
+      queue.enqueue(track(10));
+      queue.enqueue(track(20));
+
+      expect(queue.enqueueAllFirst([track(1), track(2), track(3)]), 3);
+      expect(queue.jobs.map((job) => job.track.id), [1, 2, 3, 10, 20]);
+    });
+
     test('enqueueAll notifies once, not once per track', () {
       final queue = DownloadQueue();
       var notifications = 0;
@@ -212,9 +229,17 @@ void main() {
     test('concurrency is clamped to a usable range', () {
       final queue = DownloadQueue();
       queue.maxConcurrent = 999;
-      expect(queue.maxConcurrent, 16);
+      expect(queue.maxConcurrent, maxParallelDownloads);
       queue.maxConcurrent = 0;
       expect(queue.maxConcurrent, 1);
+      queue.maxConcurrent = 32;
+      expect(queue.maxConcurrent, 32);
+    });
+
+    test('the active list can hold the full concurrency', () {
+      final queue = DownloadQueue()..maxConcurrent = maxParallelDownloads;
+      expect(queue.maxConcurrent, 64);
+      expect(queue.active, isEmpty);
     });
 
     test('jobFor finds a queued track by id', () {
@@ -222,6 +247,164 @@ void main() {
       queue.enqueue(track(7));
       expect(queue.jobFor(track(7)), isNotNull);
       expect(queue.jobFor(track(8)), isNull);
+    });
+  });
+
+  group('DownloadQueue bookkeeping', () {
+    test('the active count follows every transition', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([track(1), track(2), track(3)]);
+      expect(queue.activeCount, 3);
+      expect(queue.isBusy, isTrue);
+
+      queue.cancel(queue.jobs.first);
+      expect(queue.activeCount, 2);
+
+      queue.enqueue(track(1));
+      expect(queue.activeCount, 3, reason: 'a retry is outstanding again');
+
+      queue.cancelAll();
+      expect(queue.activeCount, 0);
+      expect(queue.isBusy, isFalse);
+
+      queue.clearFinished();
+      expect(queue.activeCount, 0);
+    });
+
+    test('the revision moves on status changes, the structure does not', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([track(1), track(2)]);
+
+      final revision = queue.revision;
+      final structure = queue.structureRevision;
+
+      queue.cancel(queue.jobs.first);
+      expect(queue.revision, greaterThan(revision));
+      expect(
+        queue.structureRevision,
+        structure,
+        reason: 'title and artist ordering must survive a status change '
+            'without re-sorting the whole queue',
+      );
+
+      queue.clearFinished();
+      expect(queue.structureRevision, greaterThan(structure));
+    });
+
+    test('the active list holds only what is downloading now', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([track(1), track(2)]);
+
+      expect(
+        queue.active,
+        isEmpty,
+        reason: 'nothing runs until a catalog is bound',
+      );
+
+      queue.cancelAll();
+      expect(queue.active, isEmpty);
+    });
+
+    test('jobs carry lower-cased sort keys computed once', () {
+      final queue = DownloadQueue();
+      queue.enqueue(
+        const Track(
+          id: 1,
+          name: 'Strobe',
+          mixName: 'Club Mix',
+          artists: [Named(name: 'Deadmau5')],
+        ),
+      );
+
+      final job = queue.jobs.single;
+      expect(job.titleKey, 'strobe (club mix)');
+      expect(job.artistKey, 'deadmau5');
+      expect(
+        identical(job.titleKey, job.titleKey),
+        isTrue,
+        reason: 'lower-casing inside a sort comparator allocates per '
+            'comparison, which dominates a large sort',
+      );
+    });
+
+    test('a retried job keeps its place in the list', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([track(1), track(2), track(3)]);
+      queue.cancel(queue.jobs[1]);
+      queue.enqueue(track(2));
+
+      expect(queue.jobs.map((job) => job.track.id), [1, 2, 3]);
+      expect(queue.jobs[1].status, JobStatus.queued);
+    });
+
+    test('queueing a page first lifts retried tracks to the front too', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([track(1), track(2), track(3)]);
+      queue.cancel(queue.jobs[2]);
+
+      expect(queue.enqueueAllFirst([track(3), track(4)]), 2);
+      expect(
+        queue.jobs.map((job) => job.track.id),
+        [3, 4, 1, 2],
+        reason: 'a track already in the queue must still be prioritized, '
+            'not left where it was',
+      );
+      expect(queue.jobs.first.status, JobStatus.queued);
+    });
+  });
+
+  group('DownloadQueue at scale', () {
+    test('requeuing a large queue stays linear', () {
+      final queue = DownloadQueue();
+      final tracks = [for (var i = 0; i < 20000; i++) track(i)];
+      queue.enqueueAll(tracks);
+      queue.cancelAll();
+
+      final stopwatch = Stopwatch()..start();
+      expect(queue.enqueueAll(tracks), 20000);
+      stopwatch.stop();
+
+      expect(queue.jobs, hasLength(20000));
+      expect(
+        stopwatch.elapsedMilliseconds,
+        lessThan(1000),
+        reason: 'removing and re-appending each job would be quadratic',
+      );
+    });
+
+    test('reading the job list does not copy it', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([for (var i = 0; i < 100000; i++) track(i)]);
+
+      final stopwatch = Stopwatch()..start();
+      var seen = 0;
+      for (var i = 0; i < 1000; i++) {
+        seen += queue.jobs.length;
+      }
+      stopwatch.stop();
+
+      expect(seen, 100000 * 1000);
+      expect(
+        stopwatch.elapsedMilliseconds,
+        lessThan(500),
+        reason: 'the Downloads list reads this on every rebuild, and '
+            'rebuilds arrive several times a second while downloads run',
+      );
+    });
+
+    test('the active count does not scan the queue', () {
+      final queue = DownloadQueue();
+      queue.enqueueAll([for (var i = 0; i < 100000; i++) track(i)]);
+
+      final stopwatch = Stopwatch()..start();
+      var seen = 0;
+      for (var i = 0; i < 1000; i++) {
+        seen += queue.activeCount;
+      }
+      stopwatch.stop();
+
+      expect(seen, 100000 * 1000);
+      expect(stopwatch.elapsedMilliseconds, lessThan(200));
     });
   });
 }

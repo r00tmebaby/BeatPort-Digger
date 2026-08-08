@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../state/session.dart';
 import 'browse_page.dart';
+import 'digger_page.dart';
 import 'downloads_page.dart';
 import 'settings_page.dart';
 import 'widgets/now_playing.dart';
@@ -23,6 +24,7 @@ class _HomePageState extends State<HomePage> {
 
   static const _destinations = [
     (icon: Icons.search, label: 'Browse'),
+    (icon: Icons.travel_explore, label: 'Digger'),
     (icon: Icons.download, label: 'Downloads'),
     (icon: Icons.settings_outlined, label: 'Settings'),
   ];
@@ -33,12 +35,20 @@ class _HomePageState extends State<HomePage> {
     (icon: Icons.link, label: 'Link'),
   ];
 
+  /// Every page stays built so its state survives switching tabs, which also
+  /// means an offscreen page keeps animating and rebuilding. Progress bars on
+  /// the Downloads page were driving repaints while the user was on Browse;
+  /// [TickerMode] stops the clocks for whichever pages are not on screen.
+  Widget _at(int index, Widget child) =>
+      TickerMode(enabled: _index == index, child: child);
+
   Widget _page() => IndexedStack(
     index: _index,
     children: [
-      BrowsePage(index: _browseTab),
-      const DownloadsPage(),
-      const SettingsPage(),
+      _at(0, BrowsePage(index: _browseTab)),
+      _at(1, const DiggerPage()),
+      _at(2, const DownloadsPage()),
+      _at(3, const SettingsPage()),
     ],
   );
 

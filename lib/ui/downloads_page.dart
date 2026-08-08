@@ -28,6 +28,16 @@ int _statusRank(JobStatus status) => switch (status) {
 class _DownloadsPageState extends State<DownloadsPage> {
   _JobOrder _order = _JobOrder.recent;
 
+  // Deriving the visible order used to mean copying, sorting and filtering the
+  // whole job list on every rebuild, and rebuilds arrive several times a
+  // second while downloads run. At a hundred thousand jobs that alone was
+  // enough to stop the list scrolling, so each derived view is cached and
+  // recomputed only when the thing it actually depends on changes.
+  List<DownloadJob>? _cachedOrder;
+  _JobOrder? _cachedOrderKind;
+  int _cachedRevision = -1;
+  int _cachedStructure = -1;
+
   @override
   void initState() {
     super.initState();
@@ -37,12 +47,17 @@ class _DownloadsPageState extends State<DownloadsPage> {
     });
   }
 
-  void _play(
-    BuildContext context,
-    DownloadJob job,
-    List<DownloadJob> completed,
-  ) {
+  void _play(BuildContext context, DownloadJob job, Iterable<DownloadJob> jobs) {
     final player = context.read<PreviewPlayer>();
+
+    // Built here rather than during build: at scale this is a full scan, and
+    // it is only ever needed the moment someone presses play.
+    final completed = [
+      for (final candidate in jobs)
+        if (candidate.status == JobStatus.completed && candidate.path != null)
+          candidate,
+    ];
+
     player.setUpNext(
       [for (final j in completed) j.track],
       files: {
@@ -53,33 +68,64 @@ class _DownloadsPageState extends State<DownloadsPage> {
     if (job.path != null) player.playLocal(job.track, job.path!);
   }
 
-  List<DownloadJob> _ordered(List<DownloadJob> jobs) {
+  /// The jobs in display order.
+  ///
+  /// "Recent" is the reverse of insertion order, which the list can read
+  /// directly by index, so it never builds a second list at all. Title and
+  /// artist order depend only on which jobs exist, so they survive a whole
+  /// download run without re-sorting. Status order is a linear bucket pass
+  /// rather than a comparison sort, because it does have to be redone
+  /// whenever a job changes state.
+  List<DownloadJob> _ordered(DownloadQueue queue) {
+    final jobs = queue.jobs;
+    if (_order == _JobOrder.recent) return jobs;
+
+    final dependsOnStatus = _order == _JobOrder.status;
+    final revision = queue.revision;
+    final structure = queue.structureRevision;
+
+    final cached = _cachedOrder;
+    if (cached != null &&
+        _cachedOrderKind == _order &&
+        _cachedStructure == structure &&
+        (!dependsOnStatus || _cachedRevision == revision)) {
+      return cached;
+    }
+
+    final List<DownloadJob> ordered;
     switch (_order) {
       case _JobOrder.recent:
-        return jobs.reversed.toList();
+        ordered = jobs;
       case _JobOrder.status:
-        return List.of(jobs)..sort(
-          (a, b) => _statusRank(a.status).compareTo(_statusRank(b.status)),
+        final buckets = List.generate(
+          JobStatus.values.length,
+          (_) => <DownloadJob>[],
+          growable: false,
         );
+        for (final job in jobs) {
+          buckets[_statusRank(job.status)].add(job);
+        }
+        ordered = [for (final bucket in buckets) ...bucket];
       case _JobOrder.title:
-        return List.of(jobs)..sort(
-          (a, b) => a.track.title.toLowerCase().compareTo(
-            b.track.title.toLowerCase(),
-          ),
-        );
+        ordered = List.of(jobs)
+          ..sort((a, b) => a.titleKey.compareTo(b.titleKey));
       case _JobOrder.artist:
-        return List.of(jobs)..sort(
-          (a, b) => a.track.artistNames.toLowerCase().compareTo(
-            b.track.artistNames.toLowerCase(),
-          ),
-        );
+        ordered = List.of(jobs)
+          ..sort((a, b) => a.artistKey.compareTo(b.artistKey));
     }
+
+    _cachedOrder = ordered;
+    _cachedOrderKind = _order;
+    _cachedRevision = revision;
+    _cachedStructure = structure;
+    return ordered;
   }
 
   @override
   Widget build(BuildContext context) {
     final queue = context.watch<DownloadQueue>();
-    final jobs = _ordered(queue.jobs);
+    final jobs = _ordered(queue);
+    final newestFirst = _order == _JobOrder.recent;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -141,6 +187,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
               ],
             ),
           ),
+        if (queue.active.isNotEmpty) _ActiveStrip(queue: queue),
         Expanded(
           child: jobs.isEmpty
               ? Center(
@@ -150,30 +197,158 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 )
-              : Builder(
-                  builder: (context) {
-                    final completed = jobs
-                        .where(
-                          (j) =>
-                              j.status == JobStatus.completed && j.path != null,
-                        )
-                        .toList();
-                    return ListView.separated(
-                      itemCount: jobs.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final job = jobs[index];
-                        return _JobTile(
-                          job: job,
-                          queue: queue,
-                          onPlay: () => _play(context, job, completed),
-                        );
-                      },
+              : ListView.separated(
+                  itemCount: jobs.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    // queue.jobs is a live view, so a clear landing between
+                    // this frame's itemCount and the rebuild that follows it
+                    // can leave an index pointing past the end.
+                    if (index >= jobs.length) return const SizedBox.shrink();
+
+                    // "Recent" reads the queue's own list backwards instead of
+                    // materialising a reversed copy of it.
+                    final job = newestFirst
+                        ? jobs[jobs.length - 1 - index]
+                        : jobs[index];
+                    return _JobTile(
+                      job: job,
+                      queue: queue,
+                      onPlay: () => _play(
+                        context,
+                        job,
+                        newestFirst ? jobs.reversed : jobs,
+                      ),
                     );
                   },
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// The tracks actually moving right now, pinned above the queue.
+///
+/// The full list can be a hundred thousand rows in any of four orders, so
+/// finding what is in flight by scrolling is hopeless.
+///
+/// Only a handful of rows are ever built. The first version used a
+/// shrink-wrapped list, which builds and lays out every child to measure
+/// itself, so at sixty-four parallel downloads it rendered sixty-four rows of
+/// animating progress bars several times a second - and kept animating them
+/// while the user was on another tab, because the app holds every page in an
+/// IndexedStack.
+class _ActiveStrip extends StatelessWidget {
+  const _ActiveStrip({required this.queue});
+
+  static const int _maxRows = 5;
+
+  final DownloadQueue queue;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final active = queue.active;
+    final shown = active.length < _maxRows ? active.length : _maxRows;
+    final hidden = active.length - shown;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Text(
+              'Downloading now (${active.length})',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          for (var i = 0; i < shown; i++)
+            _ActiveTile(job: active[i], queue: queue),
+          if (hidden > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Text(
+                'and $hidden more downloading',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActiveTile extends StatelessWidget {
+  const _ActiveTile({required this.job, required this.queue});
+
+  final DownloadJob job;
+  final DownloadQueue queue;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progress = job.progress;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${job.track.artistNames} - ${job.track.title}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 4),
+                LinearProgressIndicator(
+                  minHeight: 3,
+                  value: progress == null || progress.total == 0
+                      ? null
+                      : progress.fraction,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 96,
+            child: Text(
+              progress == null
+                  ? 'Starting...'
+                  : progress.segmented
+                  ? '${progress.completed}/${progress.total} seg'
+                  : _megabytes(progress.bytes),
+              textAlign: TextAlign.right,
+              style: theme.textTheme.labelSmall,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cancel',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => queue.cancel(job),
+          ),
+        ],
+      ),
     );
   }
 }

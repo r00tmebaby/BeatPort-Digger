@@ -108,6 +108,34 @@ void main() {
     test('drops segments that sanitise to nothing', () {
       expect(folderSegments('{genre}/{label}', make(label: '///')), ['Techno']);
     });
+
+    test('does not nest a genre inside itself', () {
+      // {subgenre} falls back to the genre when a track has none, so this
+      // template used to produce Techno/Techno for most of a genre sweep.
+      expect(folderSegments('{genre}/{subgenre}', make()), ['Techno']);
+      expect(
+        folderSegments('{genre}/{subgenre}', make(subGenre: 'Peak Time')),
+        ['Techno', 'Peak Time'],
+      );
+    });
+
+    test('a repeat is only collapsed when it is next to itself', () {
+      expect(
+        folderSegments(
+          '{genre}/{bpm10}/{subgenre}',
+          make(genre: 'Techno', bpm: 127),
+        ),
+        ['Techno', '120-129', 'Techno'],
+        reason: 'only an immediately duplicated level is the fallback bug',
+      );
+    });
+
+    test('the collapse ignores case', () {
+      expect(
+        folderSegments('{genre}/{label}', make(genre: 'Techno', label: 'TECHNO')),
+        ['Techno'],
+      );
+    });
   });
 
   group('sanitizeSegment', () {

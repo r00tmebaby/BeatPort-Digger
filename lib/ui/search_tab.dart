@@ -35,6 +35,8 @@ String _isoDay(DateTime date) =>
     '${date.year}-${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
 
+const List<int> perPageOptions = [10, 20, 50, 100, 200, 500];
+
 class SearchTab extends StatefulWidget {
   const SearchTab({super.key});
 
@@ -64,7 +66,7 @@ class _SearchTabState extends State<SearchTab> {
   Named? _subGenre;
   List<Named> _subGenres = const [];
   String _orderBy = '-publish_date';
-  int _perPage = 100;
+  int _perPage = 20;
 
   List<Track> _results = const [];
   bool _loading = false;
@@ -94,6 +96,12 @@ class _SearchTabState extends State<SearchTab> {
   final _debounce = Debouncer();
 
   final _gate = RequestGate();
+
+  // Memoized so rows are not re-subscribed on every keystroke rebuild. Both
+  // sources live for the whole app, so the merge never goes stale.
+  Listenable? _updates;
+  Listenable _liveStates(DownloadQueue queue, PreviewPlayer player) =>
+      _updates ??= Listenable.merge([queue, player]);
 
   @override
   void dispose() {
@@ -174,6 +182,9 @@ class _SearchTabState extends State<SearchTab> {
     required int page,
     bool fresh = false,
   }) async {
+    // Searching during a dig used to be blocked outright. It does not need to
+    // be: a walk in flight builds its own queries up front and is unaffected
+    // by what the search box does afterwards.
     final ticket = _gate.begin();
     setState(() {
       _loading = true;
@@ -232,8 +243,9 @@ class _SearchTabState extends State<SearchTab> {
   }
 
   Future<void> _queueAllMatching(Session session, DownloadQueue queue) async {
+    // Walk in large pages regardless of how the results are being displayed.
     Stream<Track> source = session.catalog.iterTracks(
-      _query(),
+      _query()..perPage = discoveryPerPage,
       limit: resultWindow,
     );
     if (_exclusiveOnly) source = source.where((t) => t.isExclusive);
@@ -342,7 +354,11 @@ class _SearchTabState extends State<SearchTab> {
 
     if (confirmed != true || !mounted) return;
     final added = await queue.enqueueStream(
-      session.catalog.exportTracks(_query(), _from, _to),
+      session.catalog.exportTracks(
+        _query()..perPage = discoveryPerPage,
+        _from,
+        _to,
+      ),
       label: _activeFilters.isEmpty
           ? 'Whole catalog'
           : _activeFilters.join(', '),
@@ -447,6 +463,22 @@ class _SearchTabState extends State<SearchTab> {
               ),
             ),
             const SizedBox(width: 8),
+            PopupMenuButton<int>(
+              tooltip: 'Per page',
+              onSelected: (value) {
+                setState(() => _perPage = value);
+                _searchNow(session);
+              },
+              itemBuilder: (context) => [
+                for (final n in perPageOptions)
+                  PopupMenuItem(value: n, child: Text('$n / page')),
+              ],
+              child: Chip(
+                avatar: const Icon(Icons.view_list, size: 16),
+                label: Text('$_perPage/page'),
+              ),
+            ),
+            const SizedBox(width: 8),
             Badge(
               isLabelVisible: _filterCount > 0,
               label: Text('$_filterCount'),
@@ -477,8 +509,10 @@ class _SearchTabState extends State<SearchTab> {
   Widget _downloadsMenu(Session session) {
     final capped = _totalCount >= resultWindow;
     final allLabel = _exclusiveOnly
-        ? 'Download all exclusive'
-        : 'Download all ${capped ? '$resultWindow+' : '$_totalCount'}';
+        ? 'Queue all exclusive'
+        : capped
+        ? 'Queue first $resultWindow (API cap)'
+        : 'Queue all $_totalCount';
     return PopupMenuButton<String>(
       tooltip: 'Download options',
       icon: const Icon(Icons.more_vert),
@@ -489,6 +523,8 @@ class _SearchTabState extends State<SearchTab> {
             _queueAllMatching(session, queue);
           case 'page':
             _queued(queue.enqueueAll(_shown));
+          case 'page-first':
+            _queued(queue.enqueueAllFirst(_shown));
           case 'beyond':
             _queueEverything(session, queue);
         }
@@ -501,6 +537,9 @@ class _SearchTabState extends State<SearchTab> {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.download),
             title: Text(allLabel),
+            subtitle: capped
+                ? const Text('Queues the first 10,000 matching rows')
+                : null,
           ),
         ),
         PopupMenuItem(
@@ -510,6 +549,16 @@ class _SearchTabState extends State<SearchTab> {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.article_outlined),
             title: Text('Download this page (${_shown.length})'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'page-first',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.vertical_align_top),
+            title: Text('Queue this page first (${_shown.length})'),
+            subtitle: const Text('Prioritizes these tracks next'),
           ),
         ),
         if (capped)
@@ -689,7 +738,7 @@ class _SearchTabState extends State<SearchTab> {
                                 _flags.clear();
                                 _exclusiveOnly = false;
                                 _orderBy = '-publish_date';
-                                _perPage = 100;
+                                _perPage = 20;
                               });
                               setSheet(() {});
                               _searchNow(session);
@@ -816,14 +865,14 @@ class _SearchTabState extends State<SearchTab> {
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
-                        items: const [25, 50, 100, 200]
+                        items: perPageOptions
                             .map(
                               (n) =>
                                   DropdownMenuItem(value: n, child: Text('$n')),
                             )
                             .toList(),
                         onChanged: (value) {
-                          setState(() => _perPage = value ?? 100);
+                          setState(() => _perPage = value ?? 20);
                           setSheet(() {});
                           _searchNow(session);
                         },
@@ -906,26 +955,37 @@ class _SearchTabState extends State<SearchTab> {
           ),
 
         if (_shown.isNotEmpty)
-          Consumer<DownloadQueue>(
-            builder: (context, queue, _) => _ActionBar(
-              pageCount: _shown.length,
-              totalCount: _totalCount,
-              capped: _totalCount >= resultWindow,
-              exclusiveActive: _exclusiveOnly,
-              selectedCount: _selected.length,
-              queue: queue,
+          // The action bar only reflects the discovery banner, so it listens
+          // for that rather than for the whole queue. Selecting a record means
+          // job churn, which changes none of these, no longer redraws it.
+          Builder(
+            builder: (context) {
+              context.select<DownloadQueue, ({bool on, int found})>(
+                (q) => (on: q.isDiscovering, found: q.discovered),
+              );
+              final queue = context.read<DownloadQueue>();
+              return _ActionBar(
+                pageCount: _shown.length,
+                totalCount: _totalCount,
+                capped: _totalCount >= resultWindow,
+                exclusiveActive: _exclusiveOnly,
+                selectedCount: _selected.length,
+                queue: queue,
 
-              onDownloadSelected: () => _queued(
-                queue.enqueueAll(
-                  _selected.map((id) => _seenById[id]).whereType<Track>(),
+                onDownloadSelected: () => _queued(
+                  queue.enqueueAll(
+                    _selected.map((id) => _seenById[id]).whereType<Track>(),
+                  ),
                 ),
-              ),
-              onDownloadAllMatching: () => _queueAllMatching(session, queue),
-              onDownloadThisPage: () => _queued(queue.enqueueAll(_shown)),
-              onQueueBeyond: () => _queueEverything(session, queue),
-              onClearSelection: () => setState(() => _selected = {}),
-              compact: narrow,
-            ),
+                onDownloadAllMatching: () => _queueAllMatching(session, queue),
+                onDownloadThisPage: () => _queued(queue.enqueueAll(_shown)),
+                onDownloadThisPageFirst: () =>
+                    _queued(queue.enqueueAllFirst(_shown)),
+                onQueueBeyond: () => _queueEverything(session, queue),
+                onClearSelection: () => setState(() => _selected = {}),
+                compact: narrow,
+              );
+            },
           ),
         const SizedBox(height: 8),
         Expanded(
@@ -948,8 +1008,18 @@ class _SearchTabState extends State<SearchTab> {
                     ),
                   ),
                 )
-              : Consumer2<DownloadQueue, PreviewPlayer>(
-                  builder: (context, queue, player, _) {
+              // Deliberately not a Consumer: the queue notifies on every job
+              // transition and the player on every position tick, and either
+              // used to rebuild and re-sort this whole table. The rows follow
+              // both through [TrackTable.updates] instead, each repainting
+              // only when its own state changed.
+              : Builder(
+                  builder: (context) {
+                    final queue = context.read<DownloadQueue>();
+                    final player = context.read<PreviewPlayer>();
+                    final colourByStatus = context.select<DownloadQueue, bool>(
+                      (q) => q.colourByStatus,
+                    );
                     return TrackTable(
                       tracks: _shown,
                       rankFor: _rankLabel == null
@@ -966,8 +1036,9 @@ class _SearchTabState extends State<SearchTab> {
                         player.toggle(track);
                       },
                       playingState: (track) => playbackStateFor(player, track),
-                      colourByStatus: queue.colourByStatus,
+                      colourByStatus: colourByStatus,
                       historyMarkFor: queue.historyMark,
+                      updates: _liveStates(queue, player),
                     );
                   },
                 ),
@@ -1130,6 +1201,22 @@ class _Header extends StatelessWidget {
             _field(name, 'Title', 200),
             _field(artist, 'Artist', 190),
             _field(label, 'Label', 190),
+            SizedBox(
+              width: 120,
+              child: DropdownButtonFormField<int>(
+                key: ValueKey(perPage),
+                initialValue: perPage,
+                decoration: const InputDecoration(
+                  labelText: 'Per page',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: perPageOptions
+                    .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                    .toList(),
+                onChanged: (value) => onPerPage(value ?? 20),
+              ),
+            ),
             FilledButton.icon(
               onPressed: loading ? null : onRun,
               icon: const Icon(Icons.search, size: 18),
@@ -1255,27 +1342,6 @@ class _Header extends StatelessWidget {
                               onOrderBy(value ?? '-publish_date'),
                         ),
                       ),
-                      SizedBox(
-                        width: 120,
-                        child: DropdownButtonFormField<int>(
-                          key: ValueKey(perPage),
-                          initialValue: perPage,
-                          decoration: const InputDecoration(
-                            labelText: 'Per page',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          items: const [25, 50, 100, 200]
-                              .map(
-                                (n) => DropdownMenuItem(
-                                  value: n,
-                                  child: Text('$n'),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) => onPerPage(value ?? 100),
-                        ),
-                      ),
                     ],
                   ),
                 )
@@ -1307,6 +1373,7 @@ class _ActionBar extends StatelessWidget {
     required this.onDownloadSelected,
     required this.onDownloadAllMatching,
     required this.onDownloadThisPage,
+    required this.onDownloadThisPageFirst,
     required this.onQueueBeyond,
     required this.onClearSelection,
     required this.compact,
@@ -1325,15 +1392,16 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback onDownloadSelected;
   final VoidCallback onDownloadAllMatching;
   final VoidCallback onDownloadThisPage;
+  final VoidCallback onDownloadThisPageFirst;
   final VoidCallback onQueueBeyond;
   final VoidCallback onClearSelection;
 
   final bool compact;
 
   String get _allLabel {
-    if (exclusiveActive) return 'Download all exclusive';
-    final n = capped ? '$resultWindow+' : '$totalCount';
-    return 'Download all $n';
+    if (exclusiveActive) return 'Queue all exclusive';
+    if (capped) return 'Queue first $resultWindow';
+    return 'Queue all $totalCount';
   }
 
   @override
@@ -1412,6 +1480,8 @@ class _ActionBar extends StatelessWidget {
                 switch (value) {
                   case 'page':
                     onDownloadThisPage();
+                  case 'page-first':
+                    onDownloadThisPageFirst();
                   case 'beyond':
                     onQueueBeyond();
                 }
@@ -1424,6 +1494,16 @@ class _ActionBar extends StatelessWidget {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.article_outlined),
                     title: Text('Download this page ($pageCount)'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'page-first',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.vertical_align_top),
+                    title: Text('Queue this page first ($pageCount)'),
+                    subtitle: const Text('Prioritizes these tracks next'),
                   ),
                 ),
                 if (capped)
