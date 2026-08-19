@@ -1,6 +1,5 @@
 library;
 
-import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -15,6 +14,9 @@ import 'hls.dart';
 import 'models.dart';
 import 'naming.dart';
 import 'request_limiter.dart';
+import 'transfer.dart';
+
+export 'transfer.dart' show Cancellation, DownloadCancelled;
 
 enum AudioQuality {
   lossless('lossless', 'FLAC'),
@@ -43,7 +45,13 @@ const int segmentWindow = 6;
 /// sense: sixty-four tracks would put nearly four hundred requests in flight
 /// and hold every one of their bodies in memory at the same time. This caps
 /// the whole app regardless of how many tracks are running.
-const int totalSegmentWindow = 24;
+///
+/// Sixty-four slots feeds about ten tracks' windows outright. The old cap of
+/// twenty-four was exhausted at four, which is why raising the track
+/// concurrency past that point only divided the same rate across more of
+/// them. Segments run about a hundred kilobytes, so even a full window holds
+/// only a few megabytes of bodies at a time.
+const int totalSegmentWindow = 64;
 
 /// Remuxes allowed at once.
 ///
@@ -95,25 +103,6 @@ class DownloadProgress {
   final bool segmented;
 
   double get fraction => total == 0 ? 0 : completed / total;
-}
-
-class Cancellation {
-  bool _cancelled = false;
-
-  bool get isCancelled => _cancelled;
-
-  void cancel() => _cancelled = true;
-
-  void throwIfCancelled() {
-    if (_cancelled) throw const DownloadCancelled();
-  }
-}
-
-class DownloadCancelled implements Exception {
-  const DownloadCancelled();
-
-  @override
-  String toString() => 'download cancelled';
 }
 
 class PreviewResult {
@@ -172,12 +161,14 @@ class Downloader {
     http.Client? httpClient,
     Ffmpeg? ffmpeg,
     DecryptPool? decryptPool,
+    TransferPool? transferPool,
     this.segmentConcurrency = segmentWindow,
     int totalSegments = totalSegmentWindow,
     int parallelRemux = maxParallelRemux,
   }) : _http = httpClient ?? http.Client(),
        ffmpeg = ffmpeg ?? Ffmpeg(),
        decrypt = decryptPool ?? DecryptPool(),
+       _pool = transferPool,
        _segments = RequestLimiter(totalSegments),
        _remuxes = RequestLimiter(parallelRemux);
 
@@ -187,6 +178,11 @@ class Downloader {
 
   /// Caps concurrent ffmpeg processes.
   final RequestLimiter _remuxes;
+
+  /// When present, track transfers run on its worker isolates instead of the
+  /// isolate this downloader lives on. Previews stay inline either way: they
+  /// are one small track for the player, and moving them buys nothing.
+  final TransferPool? _pool;
 
   /// Set once the account has refused enough downloads that asking again is
   /// clearly wasted. Rechecked periodically in case entitlement changes.
@@ -208,6 +204,7 @@ class Downloader {
   final int segmentConcurrency;
 
   void close() {
+    _pool?.close();
     _http.close();
     decrypt.close();
   }
@@ -314,6 +311,22 @@ class Downloader {
     }
     cancellation?.throwIfCancelled();
 
+    final pool = _pool;
+    if (pool != null) {
+      final outcome = await pool.run(
+        TransferSpec(
+          kind: TransferKind.body,
+          url: download.location,
+          directoryPath: directory.path,
+          baseName: baseName,
+          extension: download.extension,
+        ),
+        onProgress: _relayProgress(onProgress),
+        cancellation: cancellation,
+      );
+      return DownloadResult(path: outcome.path, remuxed: true);
+    }
+
     await directory.create(recursive: true);
     final target = File(
       '${directory.path}${Platform.pathSeparator}$baseName${download.extension}',
@@ -361,6 +374,24 @@ class Downloader {
     void Function(DownloadProgress)? onProgress,
     Cancellation? cancellation,
   }) async {
+    final pool = _pool;
+    if (pool != null) {
+      final outcome = await pool.run(
+        TransferSpec(
+          kind: TransferKind.stream,
+          url: streamUrl.toString(),
+          directoryPath: directory.path,
+          baseName: baseName,
+          metadataArgs: ffmpegMetadataArgs(track),
+          ffmpegTool: await ffmpeg.resolve(),
+          segmentWindow: segmentConcurrency,
+        ),
+        onProgress: _relayProgress(onProgress),
+        cancellation: cancellation,
+      );
+      return DownloadResult(path: outcome.path, remuxed: outcome.remuxed);
+    }
+
     await directory.create(recursive: true);
 
     final (playlist, key) = await loadStream(streamUrl, httpClient: _http);
@@ -376,28 +407,23 @@ class Downloader {
       final segments = playlist.segments;
       var done = 0;
 
-      final window = segmentConcurrency < 1 ? 1 : segmentConcurrency;
-      for (var start = 0; start < segments.length; start += window) {
-        cancellation?.throwIfCancelled();
-        final end = math.min(start + window, segments.length);
-
-        final batch = await Future.wait([
-          for (var i = start; i < end; i++) _fetchSegment(segments[i], i, key),
-        ]);
-
-        for (final payload in batch) {
-          sink.add(payload);
-          bytes += payload.length;
-          done += 1;
-          onProgress?.call(
-            DownloadProgress(
-              completed: done,
-              total: segments.length,
-              bytes: bytes,
-              segmented: true,
-            ),
-          );
-        }
+      await for (final payload in _orderedSegments(
+        segments,
+        segments.length,
+        key,
+        cancellation,
+      )) {
+        sink.add(payload);
+        bytes += payload.length;
+        done += 1;
+        onProgress?.call(
+          DownloadProgress(
+            completed: done,
+            total: segments.length,
+            bytes: bytes,
+            segmented: true,
+          ),
+        );
       }
       await sink.flush();
       await sink.close();
@@ -483,27 +509,23 @@ class Downloader {
     var done = 0;
     var bytes = 0;
     try {
-      final window = segmentConcurrency < 1 ? 1 : segmentConcurrency;
-      for (var start = 0; start < wanted; start += window) {
-        cancellation?.throwIfCancelled();
-        final end = math.min(start + window, wanted);
-        final batch = await Future.wait([
-          for (var i = start; i < end; i++)
-            _fetchSegment(playlist.segments[i], i, key),
-        ]);
-        for (final payload in batch) {
-          sink.add(payload);
-          bytes += payload.length;
-          done += 1;
-          onProgress?.call(
-            DownloadProgress(
-              completed: done,
-              total: wanted,
-              bytes: bytes,
-              segmented: true,
-            ),
-          );
-        }
+      await for (final payload in _orderedSegments(
+        playlist.segments,
+        wanted,
+        key,
+        cancellation,
+      )) {
+        sink.add(payload);
+        bytes += payload.length;
+        done += 1;
+        onProgress?.call(
+          DownloadProgress(
+            completed: done,
+            total: wanted,
+            bytes: bytes,
+            segmented: true,
+          ),
+        );
       }
       await sink.flush();
       await sink.close();
@@ -573,6 +595,28 @@ class Downloader {
     Cancellation? cancellation,
   }) async {
     cancellation?.throwIfCancelled();
+
+    final pool = _pool;
+    if (pool != null) {
+      final outcome = await pool.run(
+        TransferSpec(
+          kind: TransferKind.body,
+          url: sampleUrl,
+          directoryPath: directory.path,
+          baseName: baseName,
+          extension: '.mp3',
+        ),
+        onProgress: _relayProgress(onProgress),
+        cancellation: cancellation,
+      );
+      return DownloadResult(
+        path: outcome.path,
+        remuxed: true,
+        isSample: true,
+        sampleReason: reason,
+      );
+    }
+
     await directory.create(recursive: true);
     final target = File(
       '${directory.path}${Platform.pathSeparator}$baseName.mp3',
@@ -615,6 +659,38 @@ class Downloader {
     );
   }
 
+  /// Adapts pool progress to the shape every caller of this downloader
+  /// already consumes.
+  void Function(TransferUpdate)? _relayProgress(
+    void Function(DownloadProgress)? onProgress,
+  ) {
+    if (onProgress == null) return null;
+    return (update) => onProgress(
+      DownloadProgress(
+        completed: update.completed,
+        total: update.total,
+        bytes: update.bytes,
+        segmented: update.segmented,
+      ),
+    );
+  }
+
+  /// Yields the first [count] payloads of [segments] in playlist order while
+  /// keeping [segmentConcurrency] fetches in flight. The pipeline itself
+  /// lives in transfer.dart so the worker isolates run the same code.
+  Stream<Uint8List> _orderedSegments(
+    List<Uri> segments,
+    int count,
+    StreamKey? key,
+    Cancellation? cancellation,
+  ) => orderedSegmentPayloads(
+    segments: segments,
+    count: count,
+    window: segmentConcurrency,
+    fetch: (url, index) => _fetchSegment(url, index, key),
+    cancellation: cancellation,
+  );
+
   Future<Uint8List> _fetchSegment(Uri url, int index, StreamKey? key) async {
     // Gated app-wide, not per track: the body of every segment in flight is
     // held in memory until it is decrypted and written.
@@ -639,65 +715,40 @@ class Downloader {
   }
 
   Future<void> _remux(String tool, File input, File output, {Track? track}) =>
-      _remuxes.run(() => _runRemux(tool, input, output, track: track));
-
-  Future<void> _runRemux(
-    String tool,
-    File input,
-    File output, {
-    Track? track,
-  }) async {
-    final result = await Process.run(tool, [
-      '-y',
-      '-i',
-      input.path,
-      '-map_metadata',
-      '-1',
-      ..._metadataArgs(track),
-      '-c:a',
-      'copy',
-      output.path,
-    ]);
-    if (result.exitCode != 0) {
-      await output.delete().catchError((_) => output);
-      final detail = result.stderr.toString().trim();
-      throw Exception(
-        'ffmpeg failed with exit code ${result.exitCode}'
-        '${detail.isEmpty ? '' : ': ${detail.split('\n').last}'}',
+      _remuxes.run(
+        () => runFfmpegRemux(tool, input, output, ffmpegMetadataArgs(track)),
       );
+}
+
+/// Builds ffmpeg `-metadata` flags so DJ software (rekordbox, Serato,
+/// Traktor) sees title/artist/genre/BPM/key without relying on the
+/// filename. `-map_metadata -1` in the remux drops whatever the HLS segments
+/// carried; these flags then set only the fields we trust from the
+/// catalog response.
+List<String> ffmpegMetadataArgs(Track? track) {
+  if (track == null) return const [];
+  final values = templateValues(track);
+  final comment = [
+    if (values['key']!.isNotEmpty) 'Key: ${values['key']}',
+    if (values['bpm']!.isNotEmpty) 'BPM: ${values['bpm']}',
+  ].join(' | ');
+
+  void addIfPresent(List<String> args, String key, String? value) {
+    if (value != null && value.isNotEmpty) {
+      args.addAll(['-metadata', '$key=$value']);
     }
   }
 
-  /// Builds ffmpeg `-metadata` flags so DJ software (rekordbox, Serato,
-  /// Traktor) sees title/artist/genre/BPM/key without relying on the
-  /// filename. `-map_metadata -1` above drops whatever the HLS segments
-  /// carried; these flags then set only the fields we trust from the
-  /// catalog response.
-  List<String> _metadataArgs(Track? track) {
-    if (track == null) return const [];
-    final values = templateValues(track);
-    final comment = [
-      if (values['key']!.isNotEmpty) 'Key: ${values['key']}',
-      if (values['bpm']!.isNotEmpty) 'BPM: ${values['bpm']}',
-    ].join(' | ');
-
-    void addIfPresent(List<String> args, String key, String? value) {
-      if (value != null && value.isNotEmpty) {
-        args.addAll(['-metadata', '$key=$value']);
-      }
-    }
-
-    final args = <String>[];
-    addIfPresent(args, 'title', values['title']);
-    addIfPresent(args, 'artist', values['artists']);
-    addIfPresent(args, 'album', values['label']);
-    addIfPresent(
-      args,
-      'genre',
-      values['subgenre']!.isNotEmpty ? values['subgenre'] : values['genre'],
-    );
-    addIfPresent(args, 'date', values['year']);
-    addIfPresent(args, 'comment', comment.isEmpty ? null : comment);
-    return args;
-  }
+  final args = <String>[];
+  addIfPresent(args, 'title', values['title']);
+  addIfPresent(args, 'artist', values['artists']);
+  addIfPresent(args, 'album', values['label']);
+  addIfPresent(
+    args,
+    'genre',
+    values['subgenre']!.isNotEmpty ? values['subgenre'] : values['genre'],
+  );
+  addIfPresent(args, 'date', values['year']);
+  addIfPresent(args, 'comment', comment.isEmpty ? null : comment);
+  return args;
 }

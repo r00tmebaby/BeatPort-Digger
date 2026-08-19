@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -18,8 +19,88 @@ import '../engine/ffmpeg.dart';
 import '../engine/media_store.dart';
 import '../engine/models.dart';
 import '../engine/throughput.dart';
+import '../engine/transfer.dart' show TransferPool;
 
 enum JobStatus { queued, running, completed, failed, cancelled }
+
+/// How many restored records to adopt between yields to the event loop.
+/// Each one is only map work, but a queue in the hundreds of thousands makes
+/// even that seconds in total, and it happens while the app is drawing its
+/// first frames. Sized to keep one slice comfortably inside a frame.
+const int _restoreChunk = 2000;
+
+/// Reads and decodes the history file. Runs inside [Isolate.run]: the file
+/// grows past fifty megabytes once the history holds six figures, and a
+/// single jsonDecode of it on the UI isolate was most of the startup freeze.
+List<HistoryEntry> _readHistoryFile(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return const [];
+  try {
+    final payload = jsonDecode(file.readAsStringSync());
+    if (payload is! List) return const [];
+    final entries = <HistoryEntry>[];
+    for (final raw in payload.whereType<Map<String, dynamic>>()) {
+      final entry = HistoryEntry.fromJson(raw);
+      if (entry != null) entries.add(entry);
+    }
+    return entries;
+  } on Object {
+    return const [];
+  }
+}
+
+/// Encodes and writes the history from a snapshot of its entries. Runs inside
+/// [Isolate.run], where building a payload of tens of megabytes costs the UI
+/// nothing. The write stays atomic: this file was once caught truncated to
+/// zero bytes mid-write, and it is the skip-list for every download ever
+/// made, which is not a file to lose.
+Future<void> _writeHistoryFile(String path, List<HistoryEntry> entries) {
+  final buffer = StringBuffer('[');
+  for (var i = 0; i < entries.length; i++) {
+    if (i > 0) buffer.write(',');
+    buffer.write(jsonEncode(entries[i].toJson()));
+  }
+  buffer.write(']');
+  return writeFileAtomically(File(path), buffer.toString());
+}
+
+/// Stats every recorded file and reports the entries whose presence flipped.
+/// Runs inside [Isolate.run]: a six-figure history is as many stat calls.
+List<(int, bool)> _statHistoryPaths(List<(int, String, bool)> records) => [
+  for (final (id, path, present) in records)
+    if (File(path).existsSync() != present) (id, !present),
+];
+
+/// Parses the queue file, tolerating damaged lines. Runs inside
+/// [Isolate.run]: the file holds one JSON line per outstanding job and has
+/// reached hundreds of megabytes in real use, which is far too much decoding
+/// to do where the UI lives.
+Future<List<DownloadJob>> _readQueueFile(String path) async {
+  final file = File(path);
+  if (!await file.exists()) return const [];
+
+  final jobs = <DownloadJob>[];
+  try {
+    final lines = file
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+    await for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final payload = jsonDecode(line);
+        if (payload is! Map<String, dynamic>) continue;
+        final job = DownloadJob.fromJson(payload);
+        if (job != null) jobs.add(job);
+      } on FormatException {
+        continue;
+      }
+    }
+  } on Object {
+    // Best-effort: keep whatever parsed before the failure.
+  }
+  return jobs;
+}
 
 /// Total tries for one job, including the first. Only transient failures are
 /// retried; a refusal the account cannot satisfy fails straight away.
@@ -259,10 +340,18 @@ class DownloadQueue extends ChangeNotifier {
     }
     _revision += 1;
 
-    // Starting a job changes nothing worth persisting: a running job is
-    // restored as queued anyway, and rewriting a six-figure queue every time
-    // a slot turns over would keep the disk busy for no gain.
-    if (status != JobStatus.running) _scheduleQueueSave();
+    // Only failures and cancellations are worth a rewrite of the queue file.
+    // Starting a job persists nothing because a running job restores as
+    // queued anyway; a completion persists nothing because restore consults
+    // the history and skips anything already on disk. Rewriting a six-figure
+    // queue for each of those kept hundreds of megabytes churning through
+    // the disk for the whole run. Completions still mark the file stale so
+    // the next structural save, or the one on exit, trims them out.
+    if (status == JobStatus.failed || status == JobStatus.cancelled) {
+      _scheduleQueueSave();
+    } else if (status == JobStatus.completed) {
+      _queueStale = true;
+    }
   }
 
   final Map<int, HistoryEntry> _history = {};
@@ -344,7 +433,17 @@ class DownloadQueue extends ChangeNotifier {
   void bind(Catalog catalog) {
     if (_downloader?.catalog == catalog) return;
     _downloader?.close();
-    _downloader = Downloader(catalog: catalog, ffmpeg: ffmpeg);
+
+    // Transfers run on the pool's worker isolates: the UI isolate resolves
+    // the catalog metadata and receives throttled progress, while the bytes,
+    // the decryption and the remuxes live on their own threads. Before this
+    // every segment body crossed the UI event loop, which is what made the
+    // window sluggish and throughput sag while the queue ran.
+    _downloader = Downloader(
+      catalog: catalog,
+      ffmpeg: ffmpeg,
+      transferPool: TransferPool(totalSegmentSlots: totalSegmentWindow),
+    );
 
     // A queue restored from disk has nothing to run against until a catalog
     // arrives, so this is where that work actually starts.
@@ -535,14 +634,16 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<void> loadHistory() async {
     try {
-      final file = await _historyFile();
-      if (await file.exists()) {
-        final payload = jsonDecode(await file.readAsString());
-        if (payload is List) {
-          for (final raw in payload.whereType<Map<String, dynamic>>()) {
-            final entry = HistoryEntry.fromJson(raw);
-            if (entry != null) _putHistory(entry);
-          }
+      final path = (await _historyFile()).path;
+      final entries = await Isolate.run(() => _readHistoryFile(path));
+
+      var adopted = 0;
+      for (final entry in entries) {
+        // A download that completed while the file was still being read is
+        // newer than anything the file says about the same track.
+        if (!_history.containsKey(entry.trackId)) _putHistory(entry);
+        if (++adopted % _restoreChunk == 0) {
+          await Future<void>.delayed(Duration.zero);
         }
       }
       _notify();
@@ -554,20 +655,21 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<void> verifyHistory() async {
     if (_history.isEmpty) return;
-    var changed = false;
-    for (final entry in _history.values.toList()) {
-      final present = await File(entry.path).exists();
+    final records = [
+      for (final entry in _history.values)
+        (entry.trackId, entry.path, entry.present),
+    ];
+    final flips = await Isolate.run(() => _statHistoryPaths(records));
+    if (flips.isEmpty) return;
 
-      if (!_history.containsKey(entry.trackId)) continue;
-      if (present != entry.present) {
+    for (final (id, present) in flips) {
+      final entry = _history[id];
+      if (entry != null && entry.present != present) {
         _putHistory(entry.copyWith(present: present));
-        changed = true;
       }
     }
-    if (changed) {
-      _notify();
-      _scheduleHistorySave();
-    }
+    _notify();
+    _scheduleHistorySave();
   }
 
   Future<void> removeMissingHistory() async {
@@ -587,6 +689,18 @@ class DownloadQueue extends ChangeNotifier {
   bool _historyDirty = false;
   bool _historySaving = false;
 
+  /// How long to sit on history changes before writing them out.
+  ///
+  /// The write costs a full pass over every entry, so the bigger the history
+  /// the less often it is worth making. What a longer gap risks is only the
+  /// most recent completions: a crash forgets they are on disk and downloads
+  /// them again.
+  Duration get _historySaveDelay {
+    final seconds = _history.length ~/ 20000;
+    if (seconds < 1) return const Duration(milliseconds: 500);
+    return Duration(seconds: seconds > 30 ? 30 : seconds);
+  }
+
   /// Marks the history as needing a save without resetting a pending timer.
   ///
   /// The old debounce re-armed itself on every completion, so a steady rate
@@ -596,10 +710,7 @@ class DownloadQueue extends ChangeNotifier {
   void _scheduleHistorySave() {
     _historyDirty = true;
     if (!(_historyFlush?.isActive ?? false)) {
-      _historyFlush = Timer(
-        const Duration(milliseconds: 500),
-        () => unawaited(_saveHistory()),
-      );
+      _historyFlush = Timer(_historySaveDelay, () => unawaited(_saveHistory()));
     }
     _notify();
   }
@@ -623,20 +734,14 @@ class DownloadQueue extends ChangeNotifier {
 
   Future<void> _writeHistory() async {
     try {
-      // Encoded in slices with yields: a six-figure history encoded in one
-      // jsonEncode call blocks the isolate for the whole pass. The write
-      // itself is atomic, because this file was once caught truncated to
-      // zero bytes mid-write - and it is the skip-list for every download
-      // ever made, which is not a file to lose.
+      // Encoded and written in a worker isolate. This used to be sliced
+      // jsonEncode calls on the UI isolate, but the final assembly of a
+      // fifty-megabyte payload cannot be sliced, and at today's download
+      // rate the file is dirty again before each save finishes, so the UI
+      // was paying that assembly almost continuously.
+      final path = (await _historyFile()).path;
       final entries = _history.values.toList();
-      final buffer = StringBuffer('[');
-      for (var i = 0; i < entries.length; i++) {
-        if (i > 0) buffer.write(',');
-        buffer.write(jsonEncode(entries[i].toJson()));
-        if (i % 2000 == 1999) await Future<void>.delayed(Duration.zero);
-      }
-      buffer.write(']');
-      await writeFileAtomically(await _historyFile(), buffer.toString());
+      await Isolate.run(() => _writeHistoryFile(path, entries));
     } on Object {
       // Best-effort history save; ignore write failures (e.g. read-only fs).
     }
@@ -666,6 +771,14 @@ class DownloadQueue extends ChangeNotifier {
   bool _queueDirty = false;
   bool _queueSaving = false;
 
+  /// Set when the file merely lists jobs that have since completed. Unlike
+  /// [_queueDirty] this never drives a save of its own: restore skips those
+  /// jobs through the history anyway, so trimming them can wait for the next
+  /// save something else asks for, or the one on exit. Were completions to
+  /// set [_queueDirty] instead, a single failure mid-run would start a save
+  /// loop that rewrites the file continuously for as long as tracks finish.
+  bool _queueStale = false;
+
   Future<File> _queueFile() async {
     final support = await getApplicationSupportDirectory();
     return File('${support.path}${Platform.pathSeparator}download_queue.jsonl');
@@ -688,18 +801,18 @@ class DownloadQueue extends ChangeNotifier {
   Future<void> loadQueue() async {
     final restored = <DownloadJob>[];
     try {
-      final file = await _queueFile();
-      if (!await file.exists()) return;
+      // Parsed in a worker isolate: reading this file used to freeze the app
+      // for as long as the parse took, and the parse is proportional to how
+      // much was queued when the app last closed. Adoption stays here, in
+      // slices, because it touches live state.
+      final path = (await _queueFile()).path;
+      final jobs = await Isolate.run(() => _readQueueFile(path));
 
-      final lines = file
-          .openRead()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter());
-
-      await for (final line in lines) {
-        if (line.trim().isEmpty) continue;
-        final job = _decodeJob(line);
-        if (job == null) continue;
+      var adopted = 0;
+      for (final job in jobs) {
+        if (++adopted % _restoreChunk == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
 
         final id = job.track.id!;
         if (_byId.containsKey(id)) continue;
@@ -713,7 +826,7 @@ class DownloadQueue extends ChangeNotifier {
         }
       }
     } on Object {
-      // Best-effort restore; whatever was read before the failure is kept.
+      // Best-effort restore; whatever was adopted before the failure is kept.
     }
 
     if (restored.isEmpty) return;
@@ -724,29 +837,20 @@ class DownloadQueue extends ChangeNotifier {
     unawaited(_pump());
   }
 
-  /// Decodes one persisted line, tolerating a damaged record rather than
-  /// losing the rest of the queue with it.
-  DownloadJob? _decodeJob(String line) {
-    try {
-      final payload = jsonDecode(line);
-      if (payload is! Map<String, dynamic>) return null;
-      return DownloadJob.fromJson(payload);
-    } on FormatException {
-      return null;
-    }
-  }
-
-  /// Writes the outstanding queue, coalescing overlapping calls. Changes made
-  /// while a save is running trigger another pass rather than being lost.
+  /// Writes the outstanding queue, coalescing overlapping calls. Structural
+  /// changes made while a save is running trigger another pass rather than
+  /// being lost; completions landing mid-write only mark the file stale and
+  /// wait for the next save.
   Future<void> saveQueue() async {
     _queueFlush?.cancel();
     if (_queueSaving) return;
     _queueSaving = true;
     try {
-      while (_queueDirty) {
+      do {
         _queueDirty = false;
+        _queueStale = false;
         await _writeQueue();
-      }
+      } while (_queueDirty);
     } finally {
       _queueSaving = false;
     }
@@ -764,17 +868,25 @@ class DownloadQueue extends ChangeNotifier {
       final snapshot = List.of(_jobs);
       final sink = temp.openWrite();
       var written = 0;
+      // Lines are batched into one buffer per slice and handed to the sink
+      // as a single write. Writing line by line pushed a hundred thousand
+      // separate events through the sink, which took ten times as long as
+      // the encoding and held the isolate up between yields.
+      final buffer = StringBuffer();
       try {
         for (final job in snapshot) {
           if (job.status == JobStatus.completed ||
               job.status == JobStatus.cancelled) {
             continue;
           }
-          sink.writeln(jsonEncode(job.toJson()));
+          buffer.writeln(jsonEncode(job.toJson()));
           if (++written % _queueSaveChunk == 0) {
+            sink.write(buffer.toString());
+            buffer.clear();
             await Future<void>.delayed(Duration.zero);
           }
         }
+        if (buffer.isNotEmpty) sink.write(buffer.toString());
         await sink.flush();
       } finally {
         await sink.close();
@@ -1176,8 +1288,9 @@ class DownloadQueue extends ChangeNotifier {
     _historyFlush?.cancel();
 
     // Best-effort final flush. It may not finish if the process is going
-    // away, which costs at most the last few seconds of queue changes.
-    if (_queueDirty) unawaited(saveQueue());
+    // away, which costs at most the last few seconds of queue changes, or
+    // for a merely stale file some entries the next restore skips anyway.
+    if (_queueDirty || _queueStale) unawaited(saveQueue());
     _queueFlush?.cancel();
 
     for (final job in _jobs) {

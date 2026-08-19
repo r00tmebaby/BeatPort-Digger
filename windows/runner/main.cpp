@@ -5,6 +5,24 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+#ifndef PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION
+#define PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION 0x4
+#endif
+
+// Opts the process out of the power throttling Windows applies once a window
+// leaves the foreground. Downloads keep running while minimized, and without
+// this EcoQoS slows every isolate and ffmpeg child to background speed the
+// moment the app drops to the taskbar.
+static void DisableBackgroundThrottling() {
+  PROCESS_POWER_THROTTLING_STATE state{};
+  state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+  state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+                      PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+  state.StateMask = 0;
+  ::SetProcessInformation(::GetCurrentProcess(), ProcessPowerThrottling,
+                          &state, sizeof(state));
+}
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -12,6 +30,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
+
+  DisableBackgroundThrottling();
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
