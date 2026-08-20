@@ -283,14 +283,23 @@ class PreviewPlayer extends ChangeNotifier {
     await directory.delete(recursive: true).catchError((_) => directory);
   }
 
-  @override
-  void dispose() {
+  /// Tears the native player down ahead of process exit and completes when
+  /// it is actually gone. mpv keeps worker threads of its own on Windows,
+  /// and a process that dies while they run is the unkillable husk that
+  /// lingers in Task Manager after the window has closed.
+  Future<void> shutdown() async {
+    if (_disposed) return;
     _disposed = true;
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
     _downloader?.close();
-    _player.dispose();
+    await _player.dispose();
+  }
+
+  @override
+  void dispose() {
+    unawaited(shutdown());
     super.dispose();
   }
 }

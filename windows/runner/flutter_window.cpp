@@ -27,6 +27,28 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // Closing used to kill the process outright: state files died mid-write,
+  // worker isolates were cut off with the disk still flushing, and the
+  // player's native threads survived as a zombie process in Task Manager.
+  // Now WM_CLOSE only asks Dart to shut down; Dart flushes and calls
+  // "destroy" when the process may really go.
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "beatport/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "destroy") {
+          force_close_ = true;
+          result->Success();
+          PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +62,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -64,6 +87,21 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   switch (message) {
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+    case WM_CLOSE:
+      // Hidden at once so the close feels instant, while Dart flushes the
+      // queue and history and stops its workers. Dart's "destroy" call sets
+      // force_close_ and re-posts WM_CLOSE, which then falls through to the
+      // default handling. If the engine never came up, the default path
+      // closes the window directly.
+      if (!force_close_ && window_channel_) {
+        if (!close_requested_) {
+          close_requested_ = true;
+          ShowWindow(hwnd, SW_HIDE);
+          window_channel_->InvokeMethod("closeRequested", nullptr);
+        }
+        return 0;
+      }
       break;
   }
 

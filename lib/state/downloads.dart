@@ -221,6 +221,11 @@ class DownloadQueue extends ChangeNotifier {
   int _running = 0;
   bool _disposed = false;
 
+  /// Set once the window is closing: no new downloads start, and the save
+  /// schedulers stand down so nothing rewrites the state files after the
+  /// final flush in [prepareForExit].
+  bool _shuttingDown = false;
+
   Timer? _notifyTimer;
   bool _notifyPending = false;
 
@@ -709,7 +714,7 @@ class DownloadQueue extends ChangeNotifier {
   /// whole run.
   void _scheduleHistorySave() {
     _historyDirty = true;
-    if (!(_historyFlush?.isActive ?? false)) {
+    if (!_shuttingDown && !(_historyFlush?.isActive ?? false)) {
       _historyFlush = Timer(_historySaveDelay, () => unawaited(_saveHistory()));
     }
     _notify();
@@ -788,6 +793,7 @@ class DownloadQueue extends ChangeNotifier {
   /// one, so a continuous stream of changes still reaches disk on schedule
   /// instead of pushing the write back indefinitely.
   void _scheduleQueueSave() {
+    if (_shuttingDown) return;
     _queueDirty = true;
     if (_queueFlush?.isActive ?? false) return;
     _queueFlush = Timer(_saveDelay, () => unawaited(saveQueue()));
@@ -1159,6 +1165,7 @@ class DownloadQueue extends ChangeNotifier {
   }
 
   Future<void> _pump() async {
+    if (_shuttingDown) return;
     final downloader = _downloader;
     if (downloader == null) return;
 
@@ -1274,6 +1281,43 @@ class DownloadQueue extends ChangeNotifier {
       _running -= 1;
       _notify();
       unawaited(_pump());
+    }
+  }
+
+  /// Flushes state and stops the engine ahead of a window close.
+  ///
+  /// The queue file is written first, while running jobs still hold their
+  /// honest status, so anything in flight restores as queued next start.
+  /// Only then does the downloader close, which kills the transfer isolates
+  /// and quiets the disk at once. History goes last so it includes whatever
+  /// completed while the queue was being written. Each flush is skipped when
+  /// nothing changed, so an idle app still closes instantly.
+  Future<void> prepareForExit() async {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
+    _discovery?.cancel();
+
+    _queueFlush?.cancel();
+    if (_queueDirty || _queueStale || _queueSaving) {
+      await saveQueue();
+      await _saveIdle(() => _queueSaving);
+    }
+
+    _downloader?.close();
+
+    _historyFlush?.cancel();
+    if (_historyDirty || _historySaving) {
+      await _saveHistory();
+      await _saveIdle(() => _historySaving);
+    }
+  }
+
+  /// Waits out a save already in flight. The coalescing savers deliberately
+  /// return early when one is running; everywhere else that is the right
+  /// call, but the exit path must see the bytes actually on disk.
+  Future<void> _saveIdle(bool Function() busy) async {
+    while (busy()) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
     }
   }
 
